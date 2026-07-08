@@ -11,6 +11,7 @@ npm install
 ```
 
 2. Create `.env` from `.env.example` and set your Elasticsearch, S3-compatible storage, admin, and AI provider credentials.
+   If Dokploy uses Nixpacks, keep `NIXPACKS_NODE_VERSION=22` so the build resolves a supported Node package.
 
 3. Start the local stack:
 
