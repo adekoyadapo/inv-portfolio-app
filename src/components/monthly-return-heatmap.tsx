@@ -46,18 +46,18 @@ export function MonthlyReturnHeatmap({ rows, currencyCode = "USD" }: { rows: Hea
 }
 
 function cellTone(delta: number | null, maxAbsDelta: number) {
-  if (delta === null) return "bg-muted/30";
+  if (delta === null) return "bg-muted/30 dark:bg-muted/50";
   const intensity = Math.min(1, Math.abs(delta) / maxAbsDelta);
   if (delta >= 0) {
-    if (intensity > 0.75) return "bg-emerald-500/40";
-    if (intensity > 0.5) return "bg-emerald-500/30";
-    if (intensity > 0.25) return "bg-emerald-500/20";
-    return "bg-emerald-500/10";
+    if (intensity > 0.75) return "bg-emerald-500/40 dark:bg-emerald-400/70";
+    if (intensity > 0.5) return "bg-emerald-500/30 dark:bg-emerald-400/55";
+    if (intensity > 0.25) return "bg-emerald-500/20 dark:bg-emerald-400/40";
+    return "bg-emerald-500/10 dark:bg-emerald-400/25";
   }
-  if (intensity > 0.75) return "bg-destructive/40";
-  if (intensity > 0.5) return "bg-destructive/30";
-  if (intensity > 0.25) return "bg-destructive/20";
-  return "bg-destructive/10";
+  if (intensity > 0.75) return "bg-destructive/40 dark:bg-red-400/70";
+  if (intensity > 0.5) return "bg-destructive/30 dark:bg-red-400/55";
+  if (intensity > 0.25) return "bg-destructive/20 dark:bg-red-400/40";
+  return "bg-destructive/10 dark:bg-red-400/25";
 }
 
 function EmptyPanel({ message }: { message: string }) {
