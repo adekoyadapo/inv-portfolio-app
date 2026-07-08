@@ -159,6 +159,75 @@ export function buildDrilldownData(
   };
 }
 
+export type TopMover = {
+  accountId: string;
+  label: string;
+  institutionLabel: string;
+  currencyCode: string;
+  delta: number;
+  deltaPercent: number;
+};
+
+export function computeTopMovers(data: DashboardData, limit = 8): TopMover[] {
+  const movers: TopMover[] = [];
+
+  for (const snapshot of data.accountSnapshots) {
+    const accountRecords = data.records
+      .filter((record) => record.accountId === snapshot.account.id)
+      .sort((left, right) => left.month.localeCompare(right.month));
+    if (accountRecords.length < 2) continue;
+
+    const latest = accountRecords[accountRecords.length - 1];
+    const previous = accountRecords[accountRecords.length - 2];
+    const delta = latest.currentValue - previous.currentValue;
+    const deltaPercent = previous.currentValue > 0 ? delta / previous.currentValue : 0;
+
+    movers.push({
+      accountId: snapshot.account.id,
+      label: snapshot.account.name,
+      institutionLabel: snapshot.institution.name,
+      currencyCode: latest.currencyCode || "USD",
+      delta,
+      deltaPercent
+    });
+  }
+
+  return movers.sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta)).slice(0, limit);
+}
+
+export type HeatmapCell = {
+  month: string;
+  monthIndex: number;
+  delta: number | null;
+};
+
+export type HeatmapRow = {
+  year: string;
+  cells: HeatmapCell[];
+};
+
+export function computeMonthlyReturnHeatmap(data: DashboardData): HeatmapRow[] {
+  const deltaByMonth = new Map<string, number>();
+  data.timeline.forEach((point, index) => {
+    const previous = index > 0 ? data.timeline[index - 1] : undefined;
+    deltaByMonth.set(point.month, previous ? point.currentValue - previous.currentValue : 0);
+  });
+
+  const years = [...new Set(data.timeline.map((point) => point.month.split("-")[0]))].sort();
+
+  return years.map((year) => ({
+    year,
+    cells: Array.from({ length: 12 }, (_, monthIndex) => {
+      const month = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+      return {
+        month,
+        monthIndex,
+        delta: deltaByMonth.has(month) ? deltaByMonth.get(month)! : null
+      };
+    })
+  }));
+}
+
 function sumRecordsForMonth(records: MonthlyRecord[], month: string, key: "amountInvested" | "currentValue") {
   if (!month) return 0;
   return records.filter((record) => record.month === month).reduce((sum, record) => sum + record[key], 0);

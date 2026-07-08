@@ -4,6 +4,9 @@ import { AlertCircle, ArrowDownRight, ArrowUpRight, DollarSign, Info, Landmark, 
 import { AllocationDonutChart, InstitutionBreakdownChart, MetricSparkline, PortfolioTimelineChart } from "@/components/dashboard-charts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LatestAccountValuesTable } from "@/components/latest-account-values-table";
+import { MonthlyReturnHeatmap } from "@/components/monthly-return-heatmap";
+import { TopMovers } from "@/components/top-movers";
+import { computeMonthlyReturnHeatmap, computeTopMovers } from "@/lib/dashboard";
 import type { DashboardData } from "@/lib/types";
 import { cn, currency, percent } from "@/lib/utils";
 
@@ -23,6 +26,8 @@ export function DashboardView({
   const gainPositive = data.totals.gainLoss >= 0;
   const momPositive = data.totals.momDelta >= 0;
   const displayCurrencyCode = data.accountSnapshots.find((snapshot) => snapshot.latest?.currencyCode)?.latest?.currencyCode || "USD";
+  const topMovers = computeTopMovers(data);
+  const heatmapRows = computeMonthlyReturnHeatmap(data);
   const investedSparkline = data.timeline.map((point) => ({ value: point.invested }));
   const currentValueSparkline = data.timeline.map((point) => ({ value: point.currentValue }));
   const gainSparkline = data.timeline.map((point) => ({ value: point.currentValue - point.invested }));
@@ -168,6 +173,11 @@ export function DashboardView({
             )}
           </CardContent>
         </Card>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+        <TopMovers movers={topMovers} />
+        <MonthlyReturnHeatmap rows={heatmapRows} currencyCode={displayCurrencyCode} />
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">

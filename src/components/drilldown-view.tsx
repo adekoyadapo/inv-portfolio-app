@@ -5,7 +5,10 @@ import { AccountValueBarChart, AllocationDonutChart, MomDeltaBarChart, Portfolio
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { MonthlyReturnHeatmap } from "@/components/monthly-return-heatmap";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TopMovers } from "@/components/top-movers";
+import { computeMonthlyReturnHeatmap, computeTopMovers } from "@/lib/dashboard";
 import type { DrilldownData } from "@/lib/types";
 import { currency, monthLabel, percent } from "@/lib/utils";
 
@@ -21,6 +24,8 @@ export function DrilldownView({
   const gainPositive = data.totals.gainLoss >= 0;
   const momPositive = data.totals.momDelta >= 0;
   const displayCurrencyCode = data.records.find((record) => record.currencyCode)?.currencyCode || "USD";
+  const topMovers = computeTopMovers(data);
+  const heatmapRows = computeMonthlyReturnHeatmap(data);
 
   return (
     <>
@@ -105,6 +110,15 @@ export function DrilldownView({
           </CardContent>
         </Card>
       </section>
+
+      {data.scope === "account" ? (
+        <MonthlyReturnHeatmap rows={heatmapRows} currencyCode={displayCurrencyCode} />
+      ) : (
+        <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
+          <TopMovers movers={topMovers} />
+          <MonthlyReturnHeatmap rows={heatmapRows} currencyCode={displayCurrencyCode} />
+        </section>
+      )}
 
       <Card>
         <CardHeader>
