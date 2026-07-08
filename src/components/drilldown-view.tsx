@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowDownRight, ArrowLeft, ArrowUpRight, DollarSign, Landmark, TrendingUp } from "lucide-react";
 
 import { AccountValueBarChart, AllocationDonutChart, MomDeltaBarChart, PortfolioTimelineChart } from "@/components/dashboard-charts";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +27,7 @@ export function DrilldownView({
   const displayCurrencyCode = data.records.find((record) => record.currencyCode)?.currencyCode || "USD";
   const topMovers = computeTopMovers(data);
   const heatmapRows = computeMonthlyReturnHeatmap(data);
+  const institution = data.institutions.length === 1 ? data.institutions[0] : undefined;
 
   return (
     <>
@@ -37,12 +39,20 @@ export function DrilldownView({
               Back
             </Link>
           </Button>
-          <div>
-            <div className="mb-2 flex items-center gap-2">
-              <Badge variant="secondary">{data.scope}</Badge>
-              <span className="text-sm text-muted-foreground">{data.subtitle}</span>
+          <div className="flex items-center gap-3">
+            {institution ? (
+              <Avatar>
+                {institution.logoUrl ? <AvatarImage src={institution.logoUrl} alt={`${institution.name} logo`} /> : null}
+                <AvatarFallback>{institution.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+              </Avatar>
+            ) : null}
+            <div>
+              <div className="mb-2 flex items-center gap-2">
+                <Badge variant="secondary">{data.scope}</Badge>
+                <span className="text-sm text-muted-foreground">{data.subtitle}</span>
+              </div>
+              <h1 className="text-2xl font-semibold tracking-normal">{data.label}</h1>
             </div>
-            <h1 className="text-2xl font-semibold tracking-normal">{data.label}</h1>
           </div>
         </div>
       </div>
