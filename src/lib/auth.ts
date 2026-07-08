@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { env } from "@/lib/env";
@@ -28,6 +28,17 @@ function safeEqual(left: string, right: string) {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
+async function resolveCookieSecure() {
+  // This app never terminates TLS itself (no certs mounted, docker-compose maps a plain
+  // HTTP port). X-Forwarded-Proto is only present when a TLS-terminating proxy (Dokploy/
+  // Traefik) sits in front, so its absence means the request really is plain HTTP -
+  // NODE_ENV alone can't tell us that, and using it as a fallback silently drops the
+  // session cookie for direct container/LAN-IP access.
+  const headerStore = await headers();
+  const forwardedProto = headerStore.get("x-forwarded-proto");
+  return forwardedProto?.split(",")[0]?.trim() === "https";
+}
+
 export async function createSession(user: PublicUser) {
   const payload = Buffer.from(
     JSON.stringify({
@@ -37,12 +48,12 @@ export async function createSession(user: PublicUser) {
     } satisfies Session)
   ).toString("base64url");
   const token = `${payload}.${sign(payload)}`;
-  const cookieStore = await cookies();
+  const [cookieStore, secure] = await Promise.all([cookies(), resolveCookieSecure()]);
 
   cookieStore.set(cookieName, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure,
     path: "/",
     maxAge: maxAgeSeconds
   });

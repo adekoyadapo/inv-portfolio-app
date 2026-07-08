@@ -1,4 +1,6 @@
-import { AlertCircle, Download, FileUp, ImageUp, Plus, Save, Shield, UserPlus } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, Download, FileUp, ImageUp, Plus, Save, Shield, UserPlus } from "lucide-react";
+import Link from "next/link";
+import type { ReactNode } from "react";
 
 import {
   createUserAction,
@@ -19,22 +21,118 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DemoFeatureToggleCard } from "@/components/demo-feature-toggle-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MonthlyRecordsPaginationControls } from "@/components/monthly-records-pagination";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireAdminOrPortfolioAccess } from "@/lib/auth";
 import { getAiImportSettings, listAccounts, listInstitutions, listMonthlyRecords, listUsers } from "@/lib/elasticsearch";
 import { getAiRuntimeConfig } from "@/lib/ai-config";
+import { paginate, sortByComparator, type SortDirection } from "@/lib/pagination";
 import { getInitialSidebarCollapsed } from "@/lib/sidebar";
 import type { Account, Institution, MonthlyRecord, PublicUser } from "@/lib/types";
-import { currency, monthLabel } from "@/lib/utils";
+import { cn, currency, monthLabel } from "@/lib/utils";
 
 const baseAccountTypes = ["RESP", "RRSP", "TFSA", "FHSA", "DPSP", "Stock", "Index", "Cash", "Other"];
 
-export default async function AdminPage() {
-  const [session, initialSidebarCollapsed, aiImportSettings] = await Promise.all([
+type MonthlyRecordSortKey = "month" | "institution" | "account" | "currency" | "invested" | "current";
+
+const MONTHLY_RECORD_SORT_KEYS: MonthlyRecordSortKey[] = ["month", "institution", "account", "currency", "invested", "current"];
+const MONTHLY_RECORD_PAGE_SIZES = [10, 25, 50, 100] as const;
+
+type MonthlyRecordRow = MonthlyRecord & { institutionLabel: string; accountLabel: string };
+
+const MONTHLY_RECORD_COMPARATORS: Record<MonthlyRecordSortKey, (a: MonthlyRecordRow, b: MonthlyRecordRow) => number> = {
+  month: (a, b) => a.month.localeCompare(b.month),
+  institution: (a, b) => a.institutionLabel.localeCompare(b.institutionLabel),
+  account: (a, b) => a.accountLabel.localeCompare(b.accountLabel),
+  currency: (a, b) => (a.currencyCode || "USD").localeCompare(b.currencyCode || "USD"),
+  invested: (a, b) => a.amountInvested - b.amountInvested,
+  current: (a, b) => a.currentValue - b.currentValue
+};
+
+type MonthlyRecordsState = { sort: MonthlyRecordSortKey; dir: SortDirection; page: number; size: number };
+
+function firstSearchParamValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function parseMonthlyRecordsState(searchParams: Record<string, string | string[] | undefined>): MonthlyRecordsState {
+  const rawSort = firstSearchParamValue(searchParams.mr_sort);
+  const sort = MONTHLY_RECORD_SORT_KEYS.includes(rawSort as MonthlyRecordSortKey) ? (rawSort as MonthlyRecordSortKey) : "month";
+
+  const rawDir = firstSearchParamValue(searchParams.mr_dir);
+  const dir: SortDirection = rawDir === "asc" || rawDir === "desc" ? rawDir : rawSort ? "asc" : "desc";
+
+  const rawPage = Number(firstSearchParamValue(searchParams.mr_page));
+  const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+
+  const rawSize = Number(firstSearchParamValue(searchParams.mr_size));
+  const size = (MONTHLY_RECORD_PAGE_SIZES as readonly number[]).includes(rawSize) ? rawSize : 10;
+
+  return { sort, dir, page, size };
+}
+
+function buildMonthlyRecordsHref(
+  baseSearchParams: Record<string, string | string[] | undefined>,
+  state: MonthlyRecordsState,
+  overrides: Partial<MonthlyRecordsState>
+) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(baseSearchParams)) {
+    if (key.startsWith("mr_")) continue;
+    const resolved = firstSearchParamValue(value);
+    if (resolved !== undefined) params.set(key, resolved);
+  }
+  const merged = { ...state, ...overrides };
+  params.set("mr_sort", merged.sort);
+  params.set("mr_dir", merged.dir);
+  params.set("mr_page", String(merged.page));
+  params.set("mr_size", String(merged.size));
+  return `/admin?${params.toString()}#monthly-records`;
+}
+
+function MonthlyRecordSortHeader({
+  href,
+  active,
+  dir,
+  align,
+  children
+}: {
+  href: string;
+  active: boolean;
+  dir: SortDirection;
+  align?: "right";
+  children: ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn("inline-flex items-center gap-1 transition-colors hover:text-primary", align === "right" ? "flex-row-reverse" : "")}
+    >
+      {children}
+      {active ? (
+        dir === "asc" ? (
+          <ArrowUp className="size-3.5" />
+        ) : (
+          <ArrowDown className="size-3.5" />
+        )
+      ) : (
+        <ArrowUpDown className="size-3.5 opacity-40" />
+      )}
+    </Link>
+  );
+}
+
+export default async function AdminPage({
+  searchParams
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [session, initialSidebarCollapsed, aiImportSettings, rawSearchParams] = await Promise.all([
     requireAdminOrPortfolioAccess(),
     getInitialSidebarCollapsed(),
-    getAiImportSettings()
+    getAiImportSettings(),
+    searchParams
   ]);
   const runtimeConfig = getAiRuntimeConfig();
   const isAdmin = session.role === "admin";
@@ -63,6 +161,34 @@ export default async function AdminPage() {
   const accountTypes = Array.from(new Set([...baseAccountTypes, ...accounts.map((account) => account.type).filter(Boolean)])).sort((left, right) =>
     left.localeCompare(right)
   );
+
+  const monthlyRecordsState = parseMonthlyRecordsState(rawSearchParams);
+  const monthlyRecordRows: MonthlyRecordRow[] = records.map((record) => ({
+    ...record,
+    institutionLabel: institutionName.get(record.institutionId) || "Unknown",
+    accountLabel: accountById.get(record.accountId)?.name || "Unknown"
+  }));
+  const sortedMonthlyRecordRows = sortByComparator(
+    monthlyRecordRows,
+    MONTHLY_RECORD_COMPARATORS[monthlyRecordsState.sort],
+    monthlyRecordsState.dir
+  );
+  const monthlyRecordsPage = paginate(sortedMonthlyRecordRows, monthlyRecordsState.page, monthlyRecordsState.size);
+  const monthlyRecordsPageState: MonthlyRecordsState = { ...monthlyRecordsState, page: monthlyRecordsPage.page };
+  const monthlyRecordsPageSizeHrefs = Object.fromEntries(
+    MONTHLY_RECORD_PAGE_SIZES.map((size) => [size, buildMonthlyRecordsHref(rawSearchParams, monthlyRecordsPageState, { size, page: 1 })])
+  );
+  const monthlyRecordsPrevHref =
+    monthlyRecordsPage.page > 1 ? buildMonthlyRecordsHref(rawSearchParams, monthlyRecordsPageState, { page: monthlyRecordsPage.page - 1 }) : null;
+  const monthlyRecordsNextHref =
+    monthlyRecordsPage.page < monthlyRecordsPage.totalPages
+      ? buildMonthlyRecordsHref(rawSearchParams, monthlyRecordsPageState, { page: monthlyRecordsPage.page + 1 })
+      : null;
+
+  function monthlyRecordSortHref(key: MonthlyRecordSortKey) {
+    const nextDir: SortDirection = monthlyRecordsState.sort === key ? (monthlyRecordsState.dir === "asc" ? "desc" : "asc") : "asc";
+    return buildMonthlyRecordsHref(rawSearchParams, monthlyRecordsPageState, { sort: key, dir: nextDir, page: 1 });
+  }
 
   return (
     <AppShell
@@ -546,32 +672,81 @@ export default async function AdminPage() {
             </Card>
           </section>
 
-          <Card>
+          <Card id="monthly-records">
             <CardHeader>
               <CardTitle>Monthly records</CardTitle>
               <CardDescription>Each account can have one record per month.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Month</TableHead>
-                    <TableHead>Institution</TableHead>
-                    <TableHead>Account</TableHead>
-                    <TableHead>Currency</TableHead>
-                    <TableHead className="text-right">Invested</TableHead>
-                    <TableHead className="text-right">Current value</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {records.map((record) => {
-                    const account = accountById.get(record.accountId);
-                    return (
+            <CardContent className="flex flex-col gap-4">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>
+                        <MonthlyRecordSortHeader
+                          href={monthlyRecordSortHref("month")}
+                          active={monthlyRecordsState.sort === "month"}
+                          dir={monthlyRecordsState.dir}
+                        >
+                          Month
+                        </MonthlyRecordSortHeader>
+                      </TableHead>
+                      <TableHead>
+                        <MonthlyRecordSortHeader
+                          href={monthlyRecordSortHref("institution")}
+                          active={monthlyRecordsState.sort === "institution"}
+                          dir={monthlyRecordsState.dir}
+                        >
+                          Institution
+                        </MonthlyRecordSortHeader>
+                      </TableHead>
+                      <TableHead>
+                        <MonthlyRecordSortHeader
+                          href={monthlyRecordSortHref("account")}
+                          active={monthlyRecordsState.sort === "account"}
+                          dir={monthlyRecordsState.dir}
+                        >
+                          Account
+                        </MonthlyRecordSortHeader>
+                      </TableHead>
+                      <TableHead>
+                        <MonthlyRecordSortHeader
+                          href={monthlyRecordSortHref("currency")}
+                          active={monthlyRecordsState.sort === "currency"}
+                          dir={monthlyRecordsState.dir}
+                        >
+                          Currency
+                        </MonthlyRecordSortHeader>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <MonthlyRecordSortHeader
+                          href={monthlyRecordSortHref("invested")}
+                          active={monthlyRecordsState.sort === "invested"}
+                          dir={monthlyRecordsState.dir}
+                          align="right"
+                        >
+                          Invested
+                        </MonthlyRecordSortHeader>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <MonthlyRecordSortHeader
+                          href={monthlyRecordSortHref("current")}
+                          active={monthlyRecordsState.sort === "current"}
+                          dir={monthlyRecordsState.dir}
+                          align="right"
+                        >
+                          Current value
+                        </MonthlyRecordSortHeader>
+                      </TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {monthlyRecordsPage.items.map((record) => (
                       <TableRow key={record.id}>
                         <TableCell>{monthLabel(record.month)}</TableCell>
-                        <TableCell>{institutionName.get(record.institutionId) || "Unknown"}</TableCell>
-                        <TableCell>{account?.name || "Unknown"}</TableCell>
+                        <TableCell>{record.institutionLabel}</TableCell>
+                        <TableCell>{record.accountLabel}</TableCell>
                         <TableCell>{record.currencyCode || "USD"}</TableCell>
                         <TableCell className="text-right">{currency(record.amountInvested, record.currencyCode)}</TableCell>
                         <TableCell className="text-right">{currency(record.currentValue, record.currencyCode)}</TableCell>
@@ -579,11 +754,20 @@ export default async function AdminPage() {
                           <DeleteRecordButton kind="monthlyRecords" id={record.id} />
                         </TableCell>
                       </TableRow>
-                    );
-                  })}
-                  {records.length === 0 ? <EmptyRow colSpan={7} message="No monthly records yet." /> : null}
-                </TableBody>
-              </Table>
+                    ))}
+                    {monthlyRecordsPage.items.length === 0 ? <EmptyRow colSpan={7} message="No monthly records yet." /> : null}
+                  </TableBody>
+                </Table>
+              </div>
+              <MonthlyRecordsPaginationControls
+                start={monthlyRecordsPage.start}
+                end={Math.min(monthlyRecordsPage.start + monthlyRecordsState.size, monthlyRecordsPage.totalItems)}
+                totalItems={monthlyRecordsPage.totalItems}
+                pageSize={monthlyRecordsState.size}
+                pageSizeHrefs={monthlyRecordsPageSizeHrefs}
+                prevHref={monthlyRecordsPrevHref}
+                nextHref={monthlyRecordsNextHref}
+              />
             </CardContent>
           </Card>
         </>
