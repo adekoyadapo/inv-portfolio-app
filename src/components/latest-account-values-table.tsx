@@ -8,6 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { computeStaleAccountIds } from "@/lib/dashboard";
 import type { DashboardData } from "@/lib/types";
 import { currency, monthLabel } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ export function LatestAccountValuesTable({
   drilldownBasePath: string;
 }) {
   const [page, setPage] = useState(1);
+  const staleAccountIds = computeStaleAccountIds(data);
   const totalPages = Math.max(1, Math.ceil(data.accountSnapshots.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const start = (currentPage - 1) * PAGE_SIZE;
@@ -66,7 +68,18 @@ export function LatestAccountValuesTable({
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{snapshot.latest ? monthLabel(snapshot.latest.month) : "No record"}</span>
+                  <span className="flex items-center gap-2">
+                    {snapshot.latest ? monthLabel(snapshot.latest.month) : "No record"}
+                    {staleAccountIds.has(snapshot.account.id) ? (
+                      <Badge
+                        variant="outline"
+                        className="border-amber-500/40 text-amber-600 dark:text-amber-400"
+                        title="Other accounts at this institution have newer records"
+                      >
+                        Stale
+                      </Badge>
+                    ) : null}
+                  </span>
                   <span>{snapshot.latest?.currencyCode || "USD"}</span>
                 </div>
               </Link>
@@ -128,7 +141,20 @@ export function LatestAccountValuesTable({
                       </Badge>
                     </Link>
                   </TableCell>
-                  <TableCell>{snapshot.latest ? monthLabel(snapshot.latest.month) : "No record"}</TableCell>
+                  <TableCell>
+                    <span className="flex items-center gap-2">
+                      {snapshot.latest ? monthLabel(snapshot.latest.month) : "No record"}
+                      {staleAccountIds.has(snapshot.account.id) ? (
+                        <Badge
+                          variant="outline"
+                          className="border-amber-500/40 text-amber-600 dark:text-amber-400"
+                          title="Other accounts at this institution have newer records"
+                        >
+                          Stale
+                        </Badge>
+                      ) : null}
+                    </span>
+                  </TableCell>
                   <TableCell>{snapshot.latest?.currencyCode || "USD"}</TableCell>
                   <TableCell className="text-right">{currency(snapshot.latest?.amountInvested || 0, snapshot.latest?.currencyCode)}</TableCell>
                   <TableCell className="text-right">{currency(snapshot.latest?.currentValue || 0, snapshot.latest?.currencyCode)}</TableCell>

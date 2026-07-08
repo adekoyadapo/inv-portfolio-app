@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { MonthlyReturnHeatmap } from "@/components/monthly-return-heatmap";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TopMovers } from "@/components/top-movers";
-import { computeMonthlyReturnHeatmap, computeTopMovers } from "@/lib/dashboard";
+import { computeMonthlyReturnHeatmap, computeStaleAccountIds, computeTopMovers } from "@/lib/dashboard";
 import type { DrilldownData } from "@/lib/types";
 import { currency, monthLabel, percent } from "@/lib/utils";
 
@@ -28,6 +28,7 @@ export function DrilldownView({
   const topMovers = computeTopMovers(data);
   const heatmapRows = computeMonthlyReturnHeatmap(data);
   const institution = data.institutions.length === 1 ? data.institutions[0] : undefined;
+  const staleAccountIds = computeStaleAccountIds(data);
 
   return (
     <>
@@ -151,12 +152,23 @@ export function DrilldownView({
               {data.accountBreakdown.map((account) => (
                 <TableRow key={account.id}>
                   <TableCell>
-                    <Link
-                      href={`${drilldownBasePath}/account/${encodeURIComponent(account.id)}`}
-                      className="font-medium transition-colors hover:text-primary"
-                    >
-                      {account.name}
-                    </Link>
+                    <span className="flex items-center gap-2">
+                      <Link
+                        href={`${drilldownBasePath}/account/${encodeURIComponent(account.id)}`}
+                        className="font-medium transition-colors hover:text-primary"
+                      >
+                        {account.name}
+                      </Link>
+                      {staleAccountIds.has(account.id) ? (
+                        <Badge
+                          variant="outline"
+                          className="border-amber-500/40 text-amber-600 dark:text-amber-400"
+                          title="Other accounts at this institution have newer records"
+                        >
+                          Stale
+                        </Badge>
+                      ) : null}
+                    </span>
                   </TableCell>
                   <TableCell>{account.institutionName}</TableCell>
                   <TableCell>

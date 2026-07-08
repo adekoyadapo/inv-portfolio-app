@@ -159,6 +159,27 @@ export function buildDrilldownData(
   };
 }
 
+export function computeStaleAccountIds(data: DashboardData): Set<string> {
+  const latestMonthByInstitution = new Map<string, string>();
+  for (const snapshot of data.accountSnapshots) {
+    if (!snapshot.latest) continue;
+    const current = latestMonthByInstitution.get(snapshot.institution.id);
+    if (!current || snapshot.latest.month > current) {
+      latestMonthByInstitution.set(snapshot.institution.id, snapshot.latest.month);
+    }
+  }
+
+  const staleAccountIds = new Set<string>();
+  for (const snapshot of data.accountSnapshots) {
+    if (!snapshot.latest) continue;
+    const institutionLatestMonth = latestMonthByInstitution.get(snapshot.institution.id);
+    if (institutionLatestMonth && snapshot.latest.month < institutionLatestMonth) {
+      staleAccountIds.add(snapshot.account.id);
+    }
+  }
+  return staleAccountIds;
+}
+
 export type TopMover = {
   accountId: string;
   label: string;
