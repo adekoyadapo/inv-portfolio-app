@@ -1,18 +1,11 @@
-import { AppShell } from "@/components/app-shell";
 import { DashboardView } from "@/components/dashboard-view";
 import { Card, CardContent } from "@/components/ui/card";
 import { getSession } from "@/lib/auth";
 import { buildDashboardData } from "@/lib/dashboard";
 import { listAccounts, listInstitutions, listMonthlyRecords } from "@/lib/elasticsearch";
-import { getInitialSidebarCollapsed } from "@/lib/sidebar";
-import { getAiImportSettings } from "@/lib/elasticsearch";
 
 export default async function DashboardPage() {
-  const [session, initialSidebarCollapsed, aiImportSettings] = await Promise.all([
-    getSession(),
-    getInitialSidebarCollapsed(),
-    getAiImportSettings()
-  ]);
+  const session = await getSession();
 
   let data;
   let loadError = "";
@@ -24,12 +17,7 @@ export default async function DashboardPage() {
   }
 
   return (
-    <AppShell
-      session={session}
-      initialSidebarCollapsed={initialSidebarCollapsed}
-      aiImportEnabled={aiImportSettings.enabled}
-      demoEnabled={aiImportSettings.demoEnabled}
-    >
+    <>
       {!session && !loadError ? (
         <Card>
           <CardContent className="p-4 text-sm text-muted-foreground">
@@ -38,6 +26,6 @@ export default async function DashboardPage() {
         </Card>
       ) : null}
       <DashboardView data={data} loadError={loadError} />
-    </AppShell>
+    </>
   );
 }

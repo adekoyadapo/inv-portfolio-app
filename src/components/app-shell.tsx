@@ -48,14 +48,12 @@ export function AppShell({
   children,
   session,
   initialSidebarCollapsed = false,
-  aiImportEnabled = false,
-  demoEnabled = true
+  aiImportEnabled = false
 }: {
   children: React.ReactNode;
   session?: { username: string; role: UserRole } | null;
   initialSidebarCollapsed?: boolean;
   aiImportEnabled?: boolean;
-  demoEnabled?: boolean;
 }) {
   const isAdmin = session?.role === "admin";
   const isOperator = session?.role === "operator";
@@ -63,6 +61,7 @@ export function AppShell({
   const canOpenAdmin = isAdmin || isOperator || isUserManager;
   const canOpenAiImport = aiImportEnabled && (isAdmin || isOperator);
   const pathname = usePathname();
+  const isDemoRoute = pathname?.startsWith("/demo") ?? false;
   const [isNavigating, setIsNavigating] = useState(false);
   const collapsed = useSyncExternalStore(
     subscribeToSidebar,
@@ -87,12 +86,13 @@ export function AppShell({
     if (href !== pathname) setIsNavigating(true);
   }
 
-  const navItems = [
-    { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
-    ...(demoEnabled ? [{ href: "/demo", label: "Demo", icon: Sparkles }] : []),
-    ...(canOpenAdmin ? [{ href: "/admin", label: "Admin", icon: Building2 }] : []),
-    ...(canOpenAiImport ? [{ href: "/admin/ai-import", label: "AI Import", icon: FileUp }] : [])
-  ];
+  const navItems = isDemoRoute
+    ? [{ href: "/demo", label: "Demo", icon: Sparkles }]
+    : [
+        { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
+        ...(canOpenAdmin ? [{ href: "/admin", label: "Admin", icon: Building2 }] : []),
+        ...(canOpenAiImport ? [{ href: "/admin/ai-import", label: "AI Import", icon: FileUp }] : [])
+      ];
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--muted))_0,transparent_28rem),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.45))] pb-20 md:pb-0">
@@ -203,16 +203,20 @@ export function AppShell({
       </aside>
       <div className={cn("transition-[padding] duration-200", collapsed ? "md:pl-20" : "md:pl-64")}>
         <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b bg-background/95 px-4 backdrop-blur md:hidden">
-          <Link href="/dashboard" className="text-sm font-semibold" onClick={() => markNavigation("/dashboard")}>
+          <Link
+            href={isDemoRoute ? "/demo" : "/dashboard"}
+            className="text-sm font-semibold"
+            onClick={() => markNavigation(isDemoRoute ? "/demo" : "/dashboard")}
+          >
             Investment Admin
           </Link>
           <div className="flex items-center gap-2">
-            {canOpenAdmin ? (
+            {!isDemoRoute && canOpenAdmin ? (
               <Button asChild variant="ghost" size="sm">
                 <Link href="/admin" onClick={() => markNavigation("/admin")}>Admin</Link>
               </Button>
             ) : null}
-            {canOpenAiImport ? (
+            {!isDemoRoute && canOpenAiImport ? (
               <Button asChild variant="ghost" size="sm">
                 <Link href="/admin/ai-import" onClick={() => markNavigation("/admin/ai-import")}>AI Import</Link>
               </Button>

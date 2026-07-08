@@ -1,12 +1,9 @@
 import { notFound, redirect } from "next/navigation";
 
-import { AppShell } from "@/components/app-shell";
 import { DrilldownView } from "@/components/drilldown-view";
-import { getSession } from "@/lib/auth";
 import { buildDrilldownData } from "@/lib/dashboard";
 import { getDemoCollections } from "@/lib/demo-data";
 import { getAiImportSettings } from "@/lib/elasticsearch";
-import { getInitialSidebarCollapsed } from "@/lib/sidebar";
 import type { DrilldownScope } from "@/lib/types";
 
 export default async function DemoDrilldownPage({
@@ -14,11 +11,7 @@ export default async function DemoDrilldownPage({
 }: {
   params: Promise<{ scope: string; id: string }>;
 }) {
-  const [session, initialSidebarCollapsed, aiImportSettings] = await Promise.all([
-    getSession(),
-    getInitialSidebarCollapsed(),
-    getAiImportSettings()
-  ]);
+  const aiImportSettings = await getAiImportSettings();
   if (!aiImportSettings.demoEnabled) {
     redirect("/dashboard");
   }
@@ -30,16 +23,7 @@ export default async function DemoDrilldownPage({
   const data = buildDrilldownData(institutions, accounts, records, scope, decodeURIComponent(id));
   if (!data) notFound();
 
-  return (
-    <AppShell
-      session={session}
-      initialSidebarCollapsed={initialSidebarCollapsed}
-      aiImportEnabled={aiImportSettings.enabled}
-      demoEnabled={aiImportSettings.demoEnabled}
-    >
-      <DrilldownView data={data} backHref="/demo" drilldownBasePath="/demo/drill" />
-    </AppShell>
-  );
+  return <DrilldownView data={data} backHref="/demo" drilldownBasePath="/demo/drill" />;
 }
 
 function isScope(scope: string): scope is DrilldownScope {

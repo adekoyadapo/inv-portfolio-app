@@ -12,7 +12,6 @@ import {
   updateInstitutionLogoAction
 } from "@/app/actions";
 import { AiFeatureToggleCard } from "@/components/ai-feature-toggle-card";
-import { AppShell } from "@/components/app-shell";
 import { DeleteRecordButton, DeleteUserButton } from "@/components/delete-confirm-button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -28,7 +27,6 @@ import { requireAdminOrPortfolioAccess } from "@/lib/auth";
 import { getAiImportSettings, listAccounts, listInstitutions, listMonthlyRecords, listUsers } from "@/lib/elasticsearch";
 import { getAiRuntimeConfig } from "@/lib/ai-config";
 import { paginate, sortByComparator, type SortDirection } from "@/lib/pagination";
-import { getInitialSidebarCollapsed } from "@/lib/sidebar";
 import type { Account, Institution, MonthlyRecord, PublicUser } from "@/lib/types";
 import { cn, currency, monthLabel } from "@/lib/utils";
 
@@ -128,9 +126,8 @@ export default async function AdminPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [session, initialSidebarCollapsed, aiImportSettings, rawSearchParams] = await Promise.all([
+  const [session, aiImportSettings, rawSearchParams] = await Promise.all([
     requireAdminOrPortfolioAccess(),
-    getInitialSidebarCollapsed(),
     getAiImportSettings(),
     searchParams
   ]);
@@ -191,12 +188,7 @@ export default async function AdminPage({
   }
 
   return (
-    <AppShell
-      session={session}
-      initialSidebarCollapsed={initialSidebarCollapsed}
-      aiImportEnabled={aiImportSettings.enabled}
-      demoEnabled={aiImportSettings.demoEnabled}
-    >
+    <>
       <datalist id="account-type-options">
         {accountTypes.map((type) => (
           <option key={type} value={type} />
@@ -867,7 +859,7 @@ export default async function AdminPage({
           </Card>
         </section>
       ) : null}
-    </AppShell>
+    </>
   );
 }
 
