@@ -392,7 +392,10 @@ export async function deleteByField(kind: keyof typeof indices, field: string, v
   await ensureIndices();
   await elasticClient().deleteByQuery({
     index: indices[kind],
-    refresh: true,
+    // Not forcing a refresh here: this runs ahead of the top-level deleteDocument call in a
+    // cascade, which does force one. Elasticsearch's default ~1s refresh interval is well within
+    // that gap, and forcing a refresh per cascade step added avoidable latency to every delete.
+    refresh: false,
     query: { term: { [field]: value } }
   });
 }

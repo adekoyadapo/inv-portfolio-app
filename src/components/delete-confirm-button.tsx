@@ -50,9 +50,12 @@ export function DeleteUserButton({
   return <DeleteInlineConfirm kind="users" id={id} username={username} />;
 }
 
+const SLOW_DELETE_WARNING_MS = 8000;
+
 function useDeleteFormAction(kind: "institutions" | "accounts" | "monthlyRecords" | "users") {
   const router = useRouter();
   const refreshedRef = useRef(false);
+  const [slow, setSlow] = useState(false);
   const [state, formAction, pending] = useActionState<DeleteState, FormData>(
     async (_previousState, formData) => {
       if (kind === "users") {
@@ -70,7 +73,16 @@ function useDeleteFormAction(kind: "institutions" | "accounts" | "monthlyRecords
     }
   }, [router, state.status]);
 
-  return { state, formAction, pending };
+  useEffect(() => {
+    if (!pending) return;
+    const timeout = window.setTimeout(() => setSlow(true), SLOW_DELETE_WARNING_MS);
+    return () => {
+      window.clearTimeout(timeout);
+      setSlow(false);
+    };
+  }, [pending]);
+
+  return { state, formAction, pending, slow };
 }
 
 function DeleteWithDialog({
@@ -83,7 +95,7 @@ function DeleteWithDialog({
   impactMessage?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const { state, formAction, pending } = useDeleteFormAction(kind);
+  const { state, formAction, pending, slow } = useDeleteFormAction(kind);
   const dialogOpen = open && state.status !== "deleted";
 
   const label = kind === "institutions" ? "institution" : "account";
@@ -106,13 +118,19 @@ function DeleteWithDialog({
             <input type="hidden" name="id" value={id} />
             <input type="hidden" name="confirm" value="on" />
             {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
+            {pending && slow ? (
+              <p className="text-sm text-muted-foreground">
+                This is taking longer than expected. It should still complete — you can keep waiting, or cancel and
+                check back in a moment.
+              </p>
+            ) : null}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
               <Button type="submit" variant="destructive" disabled={pending}>
                 {pending ? <Loader2 className="size-4 animate-spin" data-icon="inline-start" /> : <Trash2 data-icon="inline-start" />}
-                Delete
+                {pending ? "Deleting" : "Delete"}
               </Button>
             </DialogFooter>
           </form>
