@@ -155,6 +155,30 @@ export default async function AdminPage({
 
   const institutionName = new Map(institutions.map((institution) => [institution.id, institution.name]));
   const accountById = new Map(accounts.map((account) => [account.id, account]));
+
+  const accountCountByInstitution = new Map<string, number>();
+  for (const account of accounts) {
+    accountCountByInstitution.set(account.institutionId, (accountCountByInstitution.get(account.institutionId) || 0) + 1);
+  }
+  const recordCountByAccount = new Map<string, number>();
+  const recordCountByInstitution = new Map<string, number>();
+  for (const record of records) {
+    recordCountByAccount.set(record.accountId, (recordCountByAccount.get(record.accountId) || 0) + 1);
+    recordCountByInstitution.set(record.institutionId, (recordCountByInstitution.get(record.institutionId) || 0) + 1);
+  }
+
+  function institutionDeleteImpact(institutionId: string) {
+    const accountCount = accountCountByInstitution.get(institutionId) || 0;
+    const recordCount = recordCountByInstitution.get(institutionId) || 0;
+    if (accountCount === 0 && recordCount === 0) return undefined;
+    return `also deletes ${accountCount} account${accountCount === 1 ? "" : "s"}, ${recordCount} record${recordCount === 1 ? "" : "s"}`;
+  }
+
+  function accountDeleteImpact(accountId: string) {
+    const recordCount = recordCountByAccount.get(accountId) || 0;
+    if (recordCount === 0) return undefined;
+    return `also deletes ${recordCount} record${recordCount === 1 ? "" : "s"}`;
+  }
   const accountTypes = Array.from(new Set([...baseAccountTypes, ...accounts.map((account) => account.type).filter(Boolean)])).sort((left, right) =>
     left.localeCompare(right)
   );
@@ -413,7 +437,7 @@ export default async function AdminPage({
                       </div>
                     </form>
                     <div className="flex items-center justify-end">
-                      <DeleteRecordButton kind="accounts" id={account.id} />
+                      <DeleteRecordButton kind="accounts" id={account.id} impactMessage={accountDeleteImpact(account.id)} />
                     </div>
                   </div>
                 ))
@@ -453,7 +477,7 @@ export default async function AdminPage({
                           Save
                         </Button>
                       </form>
-                      <DeleteRecordButton kind="institutions" id={institution.id} />
+                      <DeleteRecordButton kind="institutions" id={institution.id} impactMessage={institutionDeleteImpact(institution.id)} />
                     </div>
                   ))
                 ) : (
@@ -621,7 +645,7 @@ export default async function AdminPage({
                           </div>
                         </TableCell>
                         <TableCell className="text-right">
-                          <DeleteRecordButton kind="institutions" id={institution.id} />
+                          <DeleteRecordButton kind="institutions" id={institution.id} impactMessage={institutionDeleteImpact(institution.id)} />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -653,7 +677,7 @@ export default async function AdminPage({
                         <TableCell>{account.name}</TableCell>
                         <TableCell>{account.type}</TableCell>
                         <TableCell className="text-right">
-                          <DeleteRecordButton kind="accounts" id={account.id} />
+                          <DeleteRecordButton kind="accounts" id={account.id} impactMessage={accountDeleteImpact(account.id)} />
                         </TableCell>
                       </TableRow>
                     ))}

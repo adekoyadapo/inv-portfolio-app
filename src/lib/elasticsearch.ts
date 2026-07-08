@@ -358,6 +358,15 @@ export async function deleteDocument(kind: keyof typeof indices, id: string) {
   await elasticClient().delete({ index: indices[kind], id, refresh: true }, { ignore: [404] });
 }
 
+export async function deleteByField(kind: keyof typeof indices, field: string, value: string) {
+  await ensureIndices();
+  await elasticClient().deleteByQuery({
+    index: indices[kind],
+    refresh: true,
+    query: { term: { [field]: value } }
+  });
+}
+
 export async function getAiImportSettings() {
   await ensureIndices();
   const settings = await getById<AiImportSettings>(indices.aiSettings, "active");

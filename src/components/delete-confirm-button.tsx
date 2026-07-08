@@ -12,8 +12,16 @@ type DeleteState = {
   error?: string;
 };
 
-export function DeleteRecordButton({ kind, id }: { kind: "institutions" | "accounts" | "monthlyRecords"; id: string }) {
-  return <DeleteActionControl kind={kind} id={id} />;
+export function DeleteRecordButton({
+  kind,
+  id,
+  impactMessage
+}: {
+  kind: "institutions" | "accounts" | "monthlyRecords";
+  id: string;
+  impactMessage?: string;
+}) {
+  return <DeleteActionControl kind={kind} id={id} impactMessage={impactMessage} />;
 }
 
 export function DeleteUserButton({
@@ -33,11 +41,13 @@ export function DeleteUserButton({
 function DeleteActionControl({
   kind,
   id,
-  username
+  username,
+  impactMessage
 }: {
   kind: "institutions" | "accounts" | "monthlyRecords" | "users";
   id: string;
   username?: string;
+  impactMessage?: string;
 }) {
   const router = useRouter();
   const [confirmed, setConfirmed] = useState(false);
@@ -61,7 +71,10 @@ function DeleteActionControl({
 
   return (
     <form action={formAction} className="flex items-center justify-end gap-3">
-      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+      <label
+        className="flex items-center gap-2 text-xs text-muted-foreground"
+        title={impactMessage}
+      >
         <input
           type="checkbox"
           name="confirm"
@@ -70,6 +83,7 @@ function DeleteActionControl({
           className="size-4 rounded border-border"
         />
         Confirm
+        {impactMessage ? <span className="text-destructive">({impactMessage})</span> : null}
       </label>
       <input type="hidden" name="kind" value={kind === "users" ? "" : kind} />
       <input type="hidden" name="id" value={id} />

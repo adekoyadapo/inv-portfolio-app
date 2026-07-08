@@ -17,6 +17,7 @@ import { importMonthlyRecordsCsv } from "@/lib/csv";
 import {
   createUser,
   saveAiImportRun,
+  deleteByField,
   deleteDocument,
   deleteUser,
   getInstitutionById,
@@ -279,6 +280,13 @@ export async function deleteAction(arg1: FormData | { status: "idle" | "deleted"
   const id = String(formData.get("id"));
   if (!["institutions", "accounts", "monthlyRecords"].includes(kind) || !id) {
     return { status: "idle" as const, error: "Choose a record before deleting." };
+  }
+
+  if (kind === "institutions") {
+    await deleteByField("monthlyRecords", "institutionId", id);
+    await deleteByField("accounts", "institutionId", id);
+  } else if (kind === "accounts") {
+    await deleteByField("monthlyRecords", "accountId", id);
   }
 
   await deleteDocument(kind as "institutions" | "accounts" | "monthlyRecords", id);
