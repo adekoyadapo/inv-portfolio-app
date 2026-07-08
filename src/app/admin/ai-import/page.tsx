@@ -21,6 +21,7 @@ export default async function AiImportPage() {
       session={session}
       initialSidebarCollapsed={initialSidebarCollapsed}
       aiImportEnabled={settings.enabled}
+      demoEnabled={settings.demoEnabled}
     >
       <div className="flex items-center gap-3">
         <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">

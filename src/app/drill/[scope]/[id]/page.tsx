@@ -27,7 +27,12 @@ export default async function LiveDrilldownPage({
   if (!data) notFound();
 
   return (
-    <AppShell session={session} initialSidebarCollapsed={initialSidebarCollapsed} aiImportEnabled={aiImportSettings.enabled}>
+    <AppShell
+      session={session}
+      initialSidebarCollapsed={initialSidebarCollapsed}
+      aiImportEnabled={aiImportSettings.enabled}
+      demoEnabled={aiImportSettings.demoEnabled}
+    >
       <DrilldownView data={data} backHref="/dashboard" drilldownBasePath="/drill" />
     </AppShell>
   );

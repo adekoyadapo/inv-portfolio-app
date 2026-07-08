@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+
 import { AppShell } from "@/components/app-shell";
 import { DashboardView } from "@/components/dashboard-view";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,10 +14,19 @@ export default async function DemoPage() {
     getInitialSidebarCollapsed(),
     getAiImportSettings()
   ]);
+  if (!aiImportSettings.demoEnabled) {
+    redirect("/dashboard");
+  }
+
   const data = getDemoDashboardData();
 
   return (
-    <AppShell session={session} initialSidebarCollapsed={initialSidebarCollapsed} aiImportEnabled={aiImportSettings.enabled}>
+    <AppShell
+      session={session}
+      initialSidebarCollapsed={initialSidebarCollapsed}
+      aiImportEnabled={aiImportSettings.enabled}
+      demoEnabled={aiImportSettings.demoEnabled}
+    >
       <Card>
         <CardContent className="p-4 text-sm text-muted-foreground">
           Demo data is generated in-memory and does not write to Elasticsearch or object storage.

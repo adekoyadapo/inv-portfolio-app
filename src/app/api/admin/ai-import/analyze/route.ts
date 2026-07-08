@@ -2,8 +2,9 @@ import { NextRequest } from "next/server";
 
 import { getAiRuntimeCredentials } from "@/lib/ai-config";
 import { getSession } from "@/lib/auth";
-import { analyzeInvestmentStatement } from "@/lib/ai-import";
+import { analyzeInvestmentStatements, fileProgressId } from "@/lib/ai-import";
 import { getAiImportSettings } from "@/lib/elasticsearch";
+import { logServerEvent, serializeError } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
   const session = await getSession();
@@ -21,33 +22,79 @@ export async function POST(request: NextRequest) {
   }
 
   const formData = await request.formData();
-  const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) {
-    return Response.json({ error: "Choose a PDF, image, or spreadsheet export before analyzing." }, { status: 400 });
+  const files = formData.getAll("file").filter((file): file is File => file instanceof File && file.size > 0);
+  if (files.length === 0) {
+    return Response.json({ error: "Choose one or more PDF, image, or spreadsheet exports before analyzing." }, { status: 400 });
   }
 
-  const bytes = Buffer.from(await file.arrayBuffer());
+  const uploads = await Promise.all(
+    files.map(async (file) => ({
+      fileName: file.name,
+      mimeType: file.type || "application/octet-stream",
+      bytes: Buffer.from(await file.arrayBuffer()),
+      config: runtimeConfig
+    }))
+  );
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
-      function send(type: "step" | "draft" | "error", payload: unknown) {
+      function send(type: "step" | "file" | "draft" | "error", payload: unknown) {
         controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`));
       }
 
       try {
-        const draft = await analyzeInvestmentStatement({
-          fileName: file.name,
-          mimeType: file.type || "application/octet-stream",
-          bytes,
-          config: runtimeConfig,
-          onStep(step) {
-            send("step", step);
-          }
+        uploads.forEach((upload, index) => {
+          send("file", {
+            id: fileProgressId(upload.fileName, index),
+            fileName: upload.fileName,
+            bytes: upload.bytes.length,
+            status: "pending",
+            detail: "Queued for analysis.",
+            progress: 8
+          });
+        });
+        logServerEvent("info", "ai_import_analyze_started", {
+          username: session.username,
+          fileCount: uploads.length,
+          files: uploads.map((upload) => ({ fileName: upload.fileName, bytes: upload.bytes.length, mimeType: upload.mimeType })),
+          provider: runtimeConfig.provider,
+          model: runtimeConfig.model
+        });
+        const draft = await analyzeInvestmentStatements(
+          uploads.map((upload) => ({
+            ...upload,
+            onStep(step) {
+              send("step", step);
+            },
+            onFile(file) {
+              send("file", file);
+            }
+          }))
+        );
+        logServerEvent("info", "ai_import_analyze_completed", {
+          username: session.username,
+          sourceFingerprint: draft.sourceFingerprint,
+          draftCount: draft.drafts.length
         });
         send("draft", draft);
         controller.close();
       } catch (error) {
+        logServerEvent("error", "ai_import_analyze_failed", {
+          username: session.username,
+          fileCount: uploads.length,
+          error: serializeError(error)
+        });
+        uploads.forEach((upload, index) => {
+          send("file", {
+            id: fileProgressId(upload.fileName, index),
+            fileName: upload.fileName,
+            bytes: upload.bytes.length,
+            status: "error",
+            detail: error instanceof Error ? error.message : "Unable to analyze this file.",
+            progress: 100
+          });
+        });
         send("error", { message: error instanceof Error ? error.message : "Unable to analyze the upload." });
         controller.close();
       }

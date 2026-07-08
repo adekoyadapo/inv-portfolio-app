@@ -1,23 +1,36 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { CheckCircle2, Circle, CheckSquare2, Loader2, Sparkles, Square, UploadCloud, AlertTriangle } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CheckSquare2,
+  Circle,
+  Clock3,
+  FileText,
+  Layers3,
+  Loader2,
+  Sparkles,
+  Square,
+  UploadCloud
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { AiImportBatch, AiImportSettings, AiImportStep, AiRuntimeConfig } from "@/lib/types";
+import { Progress } from "@/components/ui/progress";
+import type { AiImportBatch, AiImportFileProgress, AiImportSettings, AiImportStep, AiRuntimeConfig } from "@/lib/types";
 import { currency } from "@/lib/utils";
 
 const initialSteps: AiImportStep[] = [
-  { id: "validate", label: "Validate upload", detail: "Waiting for a file.", status: "pending" },
-  { id: "read", label: "Read source", detail: "Preparing the source for analysis.", status: "pending" },
-  { id: "infer", label: "LLM extraction", detail: "Waiting for model output.", status: "pending" },
-  { id: "fallback", label: "Fallback parsing", detail: "Only used when the model cannot return structured output.", status: "pending" },
-  { id: "normalize", label: "Normalize draft", detail: "Shaping the response into records.", status: "pending" },
-  { id: "review", label: "Review ready", detail: "Waiting for extracted values.", status: "pending" }
+  { id: "validate", label: "Validate upload", detail: "Waiting for analysis to start.", status: "not_started" },
+  { id: "read", label: "Read source", detail: "Waiting for analysis to start.", status: "not_started" },
+  { id: "infer", label: "Extract records", detail: "Waiting for analysis to start.", status: "not_started" },
+  { id: "fallback", label: "Fallback parsing", detail: "Only used when the model cannot return structured output.", status: "not_started" },
+  { id: "normalize", label: "Normalize draft", detail: "Waiting for extracted records.", status: "not_started" },
+  { id: "review", label: "Review ready", detail: "Waiting for extracted values.", status: "not_started" }
 ];
 
 export function AiImportWorkbench({
@@ -34,10 +47,18 @@ export function AiImportWorkbench({
   const [isRunning, setIsRunning] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
   const [acceptMessage, setAcceptMessage] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [fileProgresses, setFileProgresses] = useState<AiImportFileProgress[]>([]);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   const activeCount = useMemo(() => steps.filter((step) => step.status === "complete").length, [steps]);
+  const overallProgress = useMemo(() => {
+    if (fileProgresses.length > 0) {
+      return Math.round(fileProgresses.reduce((sum, file) => sum + file.progress, 0) / fileProgresses.length);
+    }
+    return Math.round((activeCount / steps.length) * 100);
+  }, [activeCount, fileProgresses, steps.length]);
+  const completedFiles = useMemo(() => fileProgresses.filter((file) => file.status === "complete").length, [fileProgresses]);
   const reviewCounts = useMemo(() => {
     const drafts = batch?.drafts || [];
     const selectable = drafts.filter((draft) => !draft.duplicateOf);
@@ -61,17 +82,18 @@ export function AiImportWorkbench({
     setBatch(null);
     setAcceptMessage("");
     setIsRunning(true);
-    setSteps(initialSteps);
+    setSteps(queueSteps(initialSteps));
 
     const formData = new FormData(event.currentTarget);
-    const file = formData.get("file");
-    if (!(file instanceof File) || file.size === 0) {
-      setError("Choose a PDF, image, or spreadsheet export before starting the analysis.");
+    const files = formData.getAll("file").filter((file): file is File => file instanceof File && file.size > 0);
+    if (files.length === 0) {
+      setError("Choose one or more PDF, image, or spreadsheet exports before starting the analysis.");
       setIsRunning(false);
       return;
     }
 
-    setSelectedFile(file);
+    setSelectedFiles(files);
+    setFileProgresses(files.map((file, index) => buildFileProgress(file, index, "pending")));
 
     try {
       const response = await fetch("/api/admin/ai-import/analyze", {
@@ -80,7 +102,7 @@ export function AiImportWorkbench({
       });
 
       if (!response.ok || !response.body) {
-        const message = await response.text();
+        const message = await readResponseError(response);
         throw new Error(message || "Unable to analyze the upload.");
       }
 
@@ -88,7 +110,29 @@ export function AiImportWorkbench({
         onStep(step) {
           setSteps((current) => current.map((item) => (item.id === step.id ? step : item)));
         },
+        onFile(file) {
+          setFileProgresses((current) => current.map((item) => (item.id === file.id ? { ...item, ...file } : item)));
+        },
         onDraft(nextBatch) {
+          setSteps((current) =>
+            current.map((item) => {
+              if (item.id === "review") {
+                return {
+                  ...item,
+                  status: "complete",
+                  detail: `${nextBatch.drafts.length} review row${nextBatch.drafts.length === 1 ? "" : "s"} ready.`
+                };
+              }
+              if (item.id === "normalize" && item.status !== "complete") {
+                return {
+                  ...item,
+                  status: "complete",
+                  detail: `Normalized ${nextBatch.drafts.length} row${nextBatch.drafts.length === 1 ? "" : "s"} for review.`
+                };
+              }
+              return item;
+            })
+          );
           setBatch(nextBatch);
         },
         onError(message) {
@@ -96,7 +140,9 @@ export function AiImportWorkbench({
         }
       });
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to analyze the upload.");
+      const message = error instanceof Error ? error.message : "Unable to analyze the upload.";
+      console.error("[investment-app] AI import analyze failed", error);
+      setError(message);
     } finally {
       setIsRunning(false);
     }
@@ -123,7 +169,7 @@ export function AiImportWorkbench({
       });
 
       if (!response.ok) {
-        const message = await response.text();
+        const message = await readResponseError(response);
         throw new Error(message || "Unable to save the import.");
       }
 
@@ -133,8 +179,9 @@ export function AiImportWorkbench({
         skippedCount: number;
       };
       setBatch(null);
-      setSelectedFile(null);
+      setSelectedFiles([]);
       setSteps(initialSteps);
+      setFileProgresses([]);
       setAcceptMessage(
         result.status === "saved"
           ? `Saved ${result.savedCount} row${result.savedCount === 1 ? "" : "s"} and skipped ${result.skippedCount} duplicate${result.skippedCount === 1 ? "" : "s"}.`
@@ -144,7 +191,9 @@ export function AiImportWorkbench({
         fileInputRef.current.value = "";
       }
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to save the import.");
+      const message = error instanceof Error ? error.message : "Unable to save the import.";
+      console.error("[investment-app] AI import accept failed", error);
+      setError(message);
     } finally {
       setIsAccepting(false);
     }
@@ -196,30 +245,48 @@ export function AiImportWorkbench({
           <CardContent>
             <form onSubmit={handleAnalyze} className="space-y-4">
               <div className="flex flex-col gap-2">
-                <Label htmlFor="file">Statement file</Label>
+                <Label htmlFor="file">Statement files</Label>
                 <Input
                   ref={fileInputRef}
                   id="file"
                   name="file"
                   type="file"
                   accept=".pdf,.csv,.xlsx,.xls,image/*"
-                  onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
+                  multiple
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files || []);
+                    setSelectedFiles(files);
+                    setFileProgresses(files.map((file, index) => buildFileProgress(file, index, "not_started")));
+                    setSteps(initialSteps);
+                    setBatch(null);
+                    setAcceptMessage("");
+                    setError("");
+                  }}
                   required
                 />
               </div>
               <Button type="submit" disabled={isRunning || !settings.enabled || !runtimeConfig.hasApiKey}>
                 {isRunning ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <UploadCloud data-icon="inline-start" />}
-                {isRunning ? "Analyzing" : "Analyze statement"}
+                {isRunning ? "Analyzing" : selectedFiles.length > 1 ? "Analyze statements" : "Analyze statement"}
               </Button>
               {!settings.enabled ? (
                 <p className="text-sm text-muted-foreground">Enable the feature above before users can run imports.</p>
               ) : !runtimeConfig.hasApiKey ? (
                 <p className="text-sm text-muted-foreground">Set `AI_API_KEY` in env before running imports.</p>
               ) : null}
-              {selectedFile ? (
-                <p className="text-xs text-muted-foreground">
-                  Selected {selectedFile.name} {selectedFile.size ? `(${formatBytes(selectedFile.size)})` : null}
-                </p>
+              {selectedFiles.length > 0 ? (
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground">
+                    Selected {selectedFiles.length} file{selectedFiles.length === 1 ? "" : "s"}
+                  </p>
+                  <p className="mt-1">
+                    {selectedFiles
+                      .slice(0, 3)
+                      .map((file) => `${file.name}${file.size ? ` (${formatBytes(file.size)})` : ""}`)
+                      .join(", ")}
+                    {selectedFiles.length > 3 ? `, +${selectedFiles.length - 3} more` : ""}
+                  </p>
+                </div>
               ) : null}
             </form>
           </CardContent>
@@ -229,24 +296,92 @@ export function AiImportWorkbench({
       <div className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>Processing steps</CardTitle>
-            <CardDescription>{activeCount} of {steps.length} stages completed.</CardDescription>
+            <CardTitle className="flex items-center gap-2">
+              <Layers3 data-icon="inline-start" />
+              Processing
+            </CardTitle>
+            <CardDescription>
+              {fileProgresses.length > 0
+                ? `${completedFiles} of ${fileProgresses.length} file${fileProgresses.length === 1 ? "" : "s"} completed.`
+                : "Choose files to prepare the analysis queue."}
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {steps.map((step) => (
-              <div key={step.id} className="flex gap-3 rounded-md border p-3">
-                <StepIcon status={step.status} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium">{step.label}</p>
-                    <Badge variant={step.status === "complete" ? "default" : step.status === "running" ? "secondary" : "outline"}>
-                      {step.status}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{step.detail}</p>
+          <CardContent className="flex flex-col gap-4">
+            <div className="rounded-xl border bg-muted/20 p-4">
+              <div className="mb-3 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium">Overall progress</p>
+                  <p className="text-xs text-muted-foreground">
+                    {isRunning
+                      ? "Analyzing statements and shaping review rows."
+                      : batch
+                        ? "Review is ready."
+                        : "Waiting for analysis to start."}
+                  </p>
                 </div>
+                <Badge variant={isRunning ? "secondary" : batch ? "default" : "outline"}>{overallProgress}%</Badge>
               </div>
-            ))}
+              <Progress value={overallProgress} indeterminate={isRunning && overallProgress < 12} label="Overall analysis progress" />
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium">Files</p>
+                <Badge variant="outline">
+                  {fileProgresses.length || selectedFiles.length} selected
+                </Badge>
+              </div>
+              {fileProgresses.length > 0 ? (
+                <div className="flex flex-col gap-3">
+                  {fileProgresses.map((file) => (
+                    <div key={file.id} className="rounded-lg border bg-background/80 p-3">
+                      <div className="mb-3 flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
+                            <FileText />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{file.fileName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatBytes(file.bytes)} · {file.detail}
+                            </p>
+                          </div>
+                        </div>
+                        <Badge variant={statusBadgeVariant(file.status)}>{statusLabel(file.status)}</Badge>
+                      </div>
+                      <Progress
+                        value={file.progress}
+                        indeterminate={file.status === "running" && file.progress < 95}
+                        label={`${file.fileName} progress`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                  Selected files will appear here before analysis starts.
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium">Stages</p>
+                <Badge variant="outline">{activeCount}/{steps.length}</Badge>
+              </div>
+              {steps.map((step) => (
+                <div key={step.id} className="flex gap-3 rounded-md border p-3">
+                  <StepIcon status={step.status} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium">{step.label}</p>
+                      <Badge variant={statusBadgeVariant(step.status)}>{statusLabel(step.status)}</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{step.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
 
@@ -281,20 +416,26 @@ export function AiImportWorkbench({
                   ) : null}
                 </div>
 
-                <form onSubmit={handleAccept} className="flex items-center justify-between gap-3">
-                  <label className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <input
-                      ref={selectAllRef}
-                      type="checkbox"
-                      checked={reviewCounts.allSelected}
-                      disabled={reviewCounts.selectable === 0}
-                      onChange={(event) => toggleAllDrafts(event.currentTarget.checked)}
-                      className="size-4 rounded border-border text-primary"
-                    />
-                    <span>
-                      Select all {reviewCounts.selectable > 0 ? `(${reviewCounts.selected}/${reviewCounts.selectable})` : ""}
-                    </span>
-                  </label>
+                <form
+                  onSubmit={handleAccept}
+                  className="sticky top-16 z-10 flex flex-col gap-3 rounded-xl border bg-background/95 p-3 shadow-[0_16px_34px_-28px_rgba(15,23,42,0.45)] backdrop-blur sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm font-medium">Ready to save</p>
+                    <label className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <input
+                        ref={selectAllRef}
+                        type="checkbox"
+                        checked={reviewCounts.allSelected}
+                        disabled={reviewCounts.selectable === 0}
+                        onChange={(event) => toggleAllDrafts(event.currentTarget.checked)}
+                        className="size-4 rounded border-border text-primary"
+                      />
+                      <span>
+                        Select all {reviewCounts.selectable > 0 ? `(${reviewCounts.selected}/${reviewCounts.selectable})` : ""}
+                      </span>
+                    </label>
+                  </div>
                   <div className="flex items-center gap-2">
                     <Button
                       type="button"
@@ -304,7 +445,7 @@ export function AiImportWorkbench({
                     >
                       Clear
                     </Button>
-                    <Button type="submit" disabled={isAccepting}>
+                    <Button type="submit" disabled={isAccepting || reviewCounts.selected === 0}>
                       {isAccepting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Sparkles data-icon="inline-start" />}
                       {isAccepting ? "Saving" : "Accept and save"}
                     </Button>
@@ -322,7 +463,7 @@ export function AiImportWorkbench({
                           type="checkbox"
                           name={`selected-${index}`}
                           checked={item.selected !== false}
-                          disabled={item.selected === false}
+                          disabled={Boolean(item.duplicateOf)}
                           onChange={(event) => {
                             const checked = event.currentTarget.checked;
                             setBatch((current) => {
@@ -392,6 +533,7 @@ async function readEventStream(
   body: ReadableStream<Uint8Array>,
   handlers: {
     onStep: (step: AiImportStep) => void;
+    onFile: (file: AiImportFileProgress) => void;
     onDraft: (draft: AiImportBatch) => void;
     onError: (message: string) => never;
   }
@@ -416,12 +558,25 @@ async function readEventStream(
 
       if (event.type === "step") {
         handlers.onStep(event.payload as AiImportStep);
+      } else if (event.type === "file") {
+        handlers.onFile(event.payload as AiImportFileProgress);
       } else if (event.type === "draft") {
         handlers.onDraft(event.payload as AiImportBatch);
       } else if (event.type === "error") {
         handlers.onError(String((event.payload as { message?: string }).message || "Unable to analyze the upload."));
       }
     }
+  }
+}
+
+async function readResponseError(response: Response) {
+  const text = await response.text();
+  if (!text) return response.statusText;
+  try {
+    const parsed = JSON.parse(text) as { error?: string };
+    return parsed.error || text;
+  } catch {
+    return text;
   }
 }
 
@@ -443,8 +598,43 @@ function parseEventChunk(chunk: string) {
 function StepIcon({ status }: { status: AiImportStep["status"] }) {
   if (status === "complete") return <CheckCircle2 className="mt-0.5 size-4 text-emerald-600" />;
   if (status === "running") return <Loader2 className="mt-0.5 size-4 animate-spin text-primary" />;
+  if (status === "pending") return <Clock3 className="mt-0.5 size-4 text-muted-foreground" />;
   if (status === "error") return <Circle className="mt-0.5 size-4 text-destructive" />;
   return <Circle className="mt-0.5 size-4 text-muted-foreground" />;
+}
+
+function queueSteps(steps: AiImportStep[]) {
+  return steps.map((step) => ({
+    ...step,
+    detail: step.id === "fallback" ? "Only used when the model cannot return structured output." : "Queued for analysis.",
+    status: "pending" as const
+  }));
+}
+
+function buildFileProgress(file: File, index: number, status: AiImportFileProgress["status"]): AiImportFileProgress {
+  return {
+    id: `${index}:${file.name}`,
+    fileName: file.name,
+    bytes: file.size,
+    status,
+    detail: status === "not_started" ? "Not started." : "Queued for analysis.",
+    progress: status === "not_started" ? 0 : 8
+  };
+}
+
+function statusLabel(status: AiImportStep["status"]) {
+  if (status === "not_started") return "Not started";
+  if (status === "pending") return "Pending";
+  if (status === "running") return "Running";
+  if (status === "complete") return "Complete";
+  return "Needs attention";
+}
+
+function statusBadgeVariant(status: AiImportStep["status"]) {
+  if (status === "complete") return "default";
+  if (status === "running" || status === "pending") return "secondary";
+  if (status === "error") return "destructive";
+  return "outline";
 }
 
 function formatBytes(bytes: number) {

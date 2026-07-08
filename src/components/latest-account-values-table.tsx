@@ -28,6 +28,58 @@ export function LatestAccountValuesTable({
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="grid gap-3 lg:hidden">
+        {visibleRows.length > 0 ? (
+          visibleRows.map((snapshot) => {
+            const gain = (snapshot.latest?.currentValue || 0) - (snapshot.latest?.amountInvested || 0);
+            return (
+              <Link
+                key={snapshot.account.id}
+                href={`${drilldownBasePath}/account/${encodeURIComponent(snapshot.account.id)}`}
+                className="flex cursor-pointer flex-col gap-3 rounded-lg border bg-background/90 p-4 shadow-[0_18px_36px_-30px_rgba(15,23,42,0.5)] transition-colors hover:bg-accent"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Avatar className="size-10">
+                      {snapshot.institution.logoUrl ? (
+                        <AvatarImage src={snapshot.institution.logoUrl} alt={`${snapshot.institution.name} logo`} />
+                      ) : null}
+                      <AvatarFallback>{snapshot.institution.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{snapshot.account.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{snapshot.institution.name}</p>
+                    </div>
+                  </div>
+                  <Badge variant="secondary">{snapshot.account.type}</Badge>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-md border bg-muted/30 p-2">
+                    <p className="text-xs text-muted-foreground">Current value</p>
+                    <p className="font-semibold">{currency(snapshot.latest?.currentValue || 0, snapshot.latest?.currencyCode)}</p>
+                  </div>
+                  <div className="rounded-md border bg-muted/30 p-2">
+                    <p className="text-xs text-muted-foreground">Gain / loss</p>
+                    <p className={gain >= 0 ? "font-semibold text-emerald-600" : "font-semibold text-destructive"}>
+                      {currency(gain, snapshot.latest?.currencyCode)}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{snapshot.latest ? monthLabel(snapshot.latest.month) : "No record"}</span>
+                  <span>{snapshot.latest?.currencyCode || "USD"}</span>
+                </div>
+              </Link>
+            );
+          })
+        ) : (
+          <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+            No accounts yet. Add an institution, account, and monthly record in Admin.
+          </div>
+        )}
+      </div>
+
+      <div className="hidden overflow-x-auto lg:block">
       <Table>
         <TableHeader>
           <TableRow>
@@ -95,6 +147,7 @@ export function LatestAccountValuesTable({
           )}
         </TableBody>
       </Table>
+      </div>
 
       {data.accountSnapshots.length > PAGE_SIZE ? (
         <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">

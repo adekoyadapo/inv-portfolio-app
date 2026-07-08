@@ -103,6 +103,7 @@ export async function ensureIndices() {
   await ensureIndex(indices.aiSettings, {
     id: { type: "keyword" },
     enabled: { type: "boolean" },
+    demoEnabled: { type: "boolean" },
     updatedAt: { type: "date" },
     updatedBy: { type: "keyword" }
   });
@@ -149,6 +150,22 @@ export async function findInstitutionByName(name: string) {
   return (await listInstitutions()).find((institution) => institution.name.trim().toLowerCase() === normalized) ?? null;
 }
 
+export async function findInstitutionByLooseName(name: string) {
+  const normalized = normalizeEntityKey(name);
+  if (!normalized) return null;
+
+  const institutions = await listInstitutions();
+  return (
+    institutions.find((institution) => normalizeEntityKey(institution.name) === normalized) ??
+    institutions.find((institution) => {
+      const candidate = normalizeEntityKey(institution.name);
+      return candidate && (candidate.includes(normalized) || normalized.includes(candidate));
+    }) ??
+    institutions.find((institution) => similarityScore(normalized, normalizeEntityKey(institution.name)) >= 0.66) ??
+    null
+  );
+}
+
 export async function listAccounts() {
   return searchAll<Account>(indices.accounts, [{ "name.keyword": "asc" }]);
 }
@@ -163,6 +180,29 @@ export async function findAccountByKey(input: { institutionId: string; name: str
         account.name.trim().toLowerCase() === name &&
         account.type.trim().toLowerCase() === type
     ) ?? null
+  );
+}
+
+export async function findAccountByLooseKey(input: { institutionId: string; name: string; type: string }) {
+  const targetName = normalizeEntityKey(input.name);
+  const targetType = normalizeEntityKey(input.type);
+  const targetDigits = extractAccountDigits(input.name);
+  const candidates = (await listAccounts()).filter((account) => account.institutionId === input.institutionId);
+
+  return (
+    candidates.find((account) => normalizeEntityKey(account.name) === targetName && normalizeEntityKey(account.type) === targetType) ??
+    candidates.find((account) => {
+      const candidateDigits = extractAccountDigits(account.name);
+      return Boolean(
+        targetDigits &&
+          candidateDigits &&
+          targetDigits === candidateDigits &&
+          accountTypesCompatible(input.type, account.type, input.name, account.name)
+      );
+    }) ??
+    candidates.find((account) => normalizeEntityKey(account.type) === targetType && similarityScore(targetName, normalizeEntityKey(account.name)) >= 0.62) ??
+    candidates.find((account) => similarityScore(targetName, normalizeEntityKey(account.name)) >= 0.72) ??
+    null
   );
 }
 
@@ -321,15 +361,33 @@ export async function deleteDocument(kind: keyof typeof indices, id: string) {
 export async function getAiImportSettings() {
   await ensureIndices();
   const settings = await getById<AiImportSettings>(indices.aiSettings, "active");
-  return settings || defaultAiImportSettings();
+  return { ...defaultAiImportSettings(), ...settings };
 }
 
 export async function saveAiImportSettings(input: { enabled: boolean; updatedBy: string }) {
   await ensureIndices();
   const now = new Date().toISOString();
+  const existing = await getAiImportSettings();
   const document: AiImportSettings = {
     id: "active",
     enabled: input.enabled,
+    demoEnabled: existing.demoEnabled,
+    updatedAt: now,
+    updatedBy: input.updatedBy
+  };
+
+  await elasticClient().index({ index: indices.aiSettings, id: "active", document, refresh: true });
+  return document;
+}
+
+export async function saveDemoSettings(input: { enabled: boolean; updatedBy: string }) {
+  await ensureIndices();
+  const now = new Date().toISOString();
+  const existing = await getAiImportSettings();
+  const document: AiImportSettings = {
+    id: "active",
+    enabled: existing.enabled,
+    demoEnabled: input.enabled,
     updatedAt: now,
     updatedBy: input.updatedBy
   };
@@ -422,7 +480,67 @@ function defaultAiImportSettings(): AiImportSettings {
   return {
     id: "active",
     enabled: false,
+    demoEnabled: true,
     updatedAt: new Date().toISOString(),
     updatedBy: ""
   };
+}
+
+function normalizeEntityKey(value: string) {
+  const stopwords = new Set([
+    "account",
+    "acct",
+    "portfolio",
+    "summary",
+    "investment",
+    "investments",
+    "securities",
+    "security",
+    "inc",
+    "incorporated",
+    "ltd",
+    "limited",
+    "corp",
+    "corporation",
+    "bank",
+    "financial",
+    "wealth",
+    "the"
+  ]);
+
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((token) => token && !stopwords.has(token))
+    .join(" ");
+}
+
+function extractAccountDigits(value: string) {
+  const matches = value.match(/\d{4,}/g);
+  return matches?.at(-1)?.slice(-8) || "";
+}
+
+function accountTypesCompatible(leftType: string, rightType: string, leftName: string, rightName: string) {
+  const left = canonicalAccountType(`${leftType} ${leftName}`);
+  const right = canonicalAccountType(`${rightType} ${rightName}`);
+  if (!left || !right) return true;
+  return left === right;
+}
+
+function canonicalAccountType(value: string) {
+  const normalized = value.toUpperCase();
+  const registeredTypes = ["DPSP", "RRSP", "TFSA", "RESP", "FHSA", "RRIF", "LIRA", "LIF"];
+  return registeredTypes.find((type) => new RegExp(`\\b${type}\\b`).test(normalized)) || "";
+}
+
+function similarityScore(left: string, right: string) {
+  if (!left || !right) return 0;
+  if (left === right) return 1;
+  const leftTokens = new Set(left.split(/\s+/).filter(Boolean));
+  const rightTokens = new Set(right.split(/\s+/).filter(Boolean));
+  if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+  const intersection = Array.from(leftTokens).filter((token) => rightTokens.has(token)).length;
+  return intersection / Math.max(leftTokens.size, rightTokens.size);
 }

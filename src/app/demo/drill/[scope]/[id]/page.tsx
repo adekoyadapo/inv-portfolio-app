@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { DrilldownView } from "@/components/drilldown-view";
@@ -19,6 +19,10 @@ export default async function DemoDrilldownPage({
     getInitialSidebarCollapsed(),
     getAiImportSettings()
   ]);
+  if (!aiImportSettings.demoEnabled) {
+    redirect("/dashboard");
+  }
+
   const { scope, id } = await params;
   if (!isScope(scope)) notFound();
 
@@ -27,7 +31,12 @@ export default async function DemoDrilldownPage({
   if (!data) notFound();
 
   return (
-    <AppShell session={session} initialSidebarCollapsed={initialSidebarCollapsed} aiImportEnabled={aiImportSettings.enabled}>
+    <AppShell
+      session={session}
+      initialSidebarCollapsed={initialSidebarCollapsed}
+      aiImportEnabled={aiImportSettings.enabled}
+      demoEnabled={aiImportSettings.demoEnabled}
+    >
       <DrilldownView data={data} backHref="/demo" drilldownBasePath="/demo/drill" />
     </AppShell>
   );

@@ -1,10 +1,9 @@
-import { AlertCircle, Download, FileUp, ImageUp, Plus, Save, Shield, Trash2, UserPlus } from "lucide-react";
+import { AlertCircle, Download, FileUp, ImageUp, Plus, Save, Shield, UserPlus } from "lucide-react";
 
 import {
   createUserAction,
-  deleteAction,
-  deleteUserAction,
   importCsvAction,
+  renameAccountTypeAction,
   saveAccountAction,
   saveInstitutionAction,
   saveMonthlyRecordAction,
@@ -12,10 +11,12 @@ import {
 } from "@/app/actions";
 import { AiFeatureToggleCard } from "@/components/ai-feature-toggle-card";
 import { AppShell } from "@/components/app-shell";
+import { DeleteRecordButton, DeleteUserButton } from "@/components/delete-confirm-button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DemoFeatureToggleCard } from "@/components/demo-feature-toggle-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,7 +28,7 @@ import { getInitialSidebarCollapsed } from "@/lib/sidebar";
 import type { Account, Institution, MonthlyRecord, PublicUser } from "@/lib/types";
 import { currency, monthLabel } from "@/lib/utils";
 
-const accountTypes = ["RESP", "RRSP", "TFSA", "Stock", "Index", "Cash", "Other"];
+const baseAccountTypes = ["RESP", "RRSP", "TFSA", "FHSA", "DPSP", "Stock", "Index", "Cash", "Other"];
 
 export default async function AdminPage() {
   const [session, initialSidebarCollapsed, aiImportSettings] = await Promise.all([
@@ -59,15 +60,26 @@ export default async function AdminPage() {
 
   const institutionName = new Map(institutions.map((institution) => [institution.id, institution.name]));
   const accountById = new Map(accounts.map((account) => [account.id, account]));
+  const accountTypes = Array.from(new Set([...baseAccountTypes, ...accounts.map((account) => account.type).filter(Boolean)])).sort((left, right) =>
+    left.localeCompare(right)
+  );
 
   return (
     <AppShell
       session={session}
       initialSidebarCollapsed={initialSidebarCollapsed}
       aiImportEnabled={aiImportSettings.enabled}
+      demoEnabled={aiImportSettings.demoEnabled}
     >
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-normal">Admin</h1>
+      <datalist id="account-type-options">
+        {accountTypes.map((type) => (
+          <option key={type} value={type} />
+        ))}
+      </datalist>
+
+      <div className="flex flex-col gap-4 rounded-lg border bg-background/85 p-5 shadow-[0_22px_70px_-48px_rgba(15,23,42,0.55)] backdrop-blur sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">Admin</h1>
         <p className="text-sm text-muted-foreground">
           {isAdmin
             ? "Manage institutions, accounts, month-end values, user access, and AI import controls."
@@ -75,6 +87,21 @@ export default async function AdminPage() {
               ? "Manage institutions, accounts, and month-end values."
               : "Manage user access only."}
         </p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground sm:min-w-80">
+          <div className="rounded-md border bg-muted/40 px-3 py-2">
+            <p>Institutions</p>
+            <p className="text-lg font-semibold text-foreground">{institutions.length}</p>
+          </div>
+          <div className="rounded-md border bg-muted/40 px-3 py-2">
+            <p>Accounts</p>
+            <p className="text-lg font-semibold text-foreground">{accounts.length}</p>
+          </div>
+          <div className="rounded-md border bg-muted/40 px-3 py-2">
+            <p>Users</p>
+            <p className="text-lg font-semibold text-foreground">{users.length}</p>
+          </div>
+        </div>
       </div>
 
       {loadError ? (
@@ -87,8 +114,9 @@ export default async function AdminPage() {
       ) : null}
 
       {isAdmin ? (
-        <section className="grid gap-4 xl:grid-cols-1">
+        <section className="grid gap-4 xl:grid-cols-2">
           <AiFeatureToggleCard enabled={aiImportSettings.enabled} runtimeConfig={runtimeConfig} />
+          <DemoFeatureToggleCard enabled={aiImportSettings.demoEnabled} />
         </section>
       ) : null}
 
@@ -148,20 +176,7 @@ export default async function AdminPage() {
                   </div>
                   <div className="flex flex-col gap-2">
                     <Label htmlFor="account-type">Type</Label>
-                    <Select name="type" required>
-                      <SelectTrigger id="account-type">
-                        <SelectValue placeholder="Select type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {accountTypes.map((type) => (
-                            <SelectItem key={type} value={type}>
-                              {type}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
+                    <Input id="account-type" name="type" list="account-type-options" placeholder="RESP, TFSA, Cash..." required />
                   </div>
                   <Button type="submit" disabled={institutions.length === 0}>
                     <Plus data-icon="inline-start" />
@@ -243,56 +258,122 @@ export default async function AdminPage() {
             <CardContent className="space-y-3">
               {accounts.length > 0 ? (
                 accounts.map((account) => (
-                  <form
+                  <div
                     key={account.id}
-                    action={saveAccountAction}
-                    className="grid gap-3 rounded-xl border border-border/70 bg-background/80 p-4 shadow-[0_14px_28px_-22px_rgba(15,23,42,0.28)] lg:grid-cols-[1.1fr_1.2fr_180px_auto]"
+                    className="grid gap-3 rounded-xl border border-border/70 bg-background/80 p-4 shadow-[0_14px_28px_-22px_rgba(15,23,42,0.28)] lg:grid-cols-[1.1fr_1.2fr_180px_auto_auto]"
                   >
-                    <input type="hidden" name="id" value={account.id} />
-                    <input type="hidden" name="institutionId" value={account.institutionId} />
                     <div className="flex flex-col justify-center gap-1">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Institution</p>
                       <p className="font-medium">{institutionName.get(account.institutionId) || "Unknown"}</p>
                     </div>
-                    <div className="flex flex-col gap-2">
-                      <Label className="sr-only" htmlFor={`edit-account-name-${account.id}`}>
-                        Account name
-                      </Label>
-                      <Input id={`edit-account-name-${account.id}`} name="name" defaultValue={account.name} />
+                    <form action={saveAccountAction} className="contents">
+                      <input type="hidden" name="id" value={account.id} />
+                      <input type="hidden" name="institutionId" value={account.institutionId} />
+                      <div className="flex flex-col gap-2">
+                        <Label className="sr-only" htmlFor={`edit-account-name-${account.id}`}>
+                          Account name
+                        </Label>
+                        <Input id={`edit-account-name-${account.id}`} name="name" defaultValue={account.name} required />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Label className="sr-only" htmlFor={`edit-account-type-${account.id}`}>
+                          Account type
+                        </Label>
+                        <Input
+                          id={`edit-account-type-${account.id}`}
+                          name="type"
+                          list="account-type-options"
+                          defaultValue={account.type}
+                          required
+                        />
+                      </div>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button type="submit">
+                          <Save data-icon="inline-start" />
+                          Save
+                        </Button>
+                      </div>
+                    </form>
+                    <div className="flex items-center justify-end">
+                      <DeleteRecordButton kind="accounts" id={account.id} />
                     </div>
-                    <div className="flex flex-col gap-2">
-                      <Label className="sr-only" htmlFor={`edit-account-type-${account.id}`}>
-                        Account type
-                      </Label>
-                      <Select name="type" defaultValue={account.type} required>
-                        <SelectTrigger id={`edit-account-type-${account.id}`}>
-                          <SelectValue placeholder="Select type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            {accountTypes.map((type) => (
-                              <SelectItem key={type} value={type}>
-                                {type}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center justify-end gap-2">
-                      <Button type="submit">
-                        <Save data-icon="inline-start" />
-                        Save
-                      </Button>
-                      <DeleteButton kind="accounts" id={account.id} />
-                    </div>
-                  </form>
+                  </div>
                 ))
               ) : (
                 <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No accounts yet.</p>
               )}
             </CardContent>
           </Card>
+
+          <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+            <Card className="overflow-hidden border-border/70 bg-background/90 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.32)]">
+              <CardHeader>
+                <CardTitle>Edit institutions</CardTitle>
+                <CardDescription>Rename institutions without losing their logos, accounts, or monthly records.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                {institutions.length > 0 ? (
+                  institutions.map((institution) => (
+                    <div
+                      key={institution.id}
+                      className="grid gap-3 rounded-xl border border-border/70 bg-background/80 p-4 sm:grid-cols-[auto_1fr_auto_auto]"
+                    >
+                      <Avatar>
+                        {institution.logoUrl ? <AvatarImage src={institution.logoUrl} alt={`${institution.name} logo`} /> : null}
+                        <AvatarFallback>{institution.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                      <form action={saveInstitutionAction} className="contents">
+                        <input type="hidden" name="id" value={institution.id} />
+                        <div className="flex flex-col gap-2">
+                          <Label className="sr-only" htmlFor={`edit-institution-name-${institution.id}`}>
+                            Institution name
+                          </Label>
+                          <Input id={`edit-institution-name-${institution.id}`} name="name" defaultValue={institution.name} required />
+                        </div>
+                        <Button type="submit">
+                          <Save data-icon="inline-start" />
+                          Save
+                        </Button>
+                      </form>
+                      <DeleteRecordButton kind="institutions" id={institution.id} />
+                    </div>
+                  ))
+                ) : (
+                  <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No institutions yet.</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="overflow-hidden border-border/70 bg-background/90 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.32)]">
+              <CardHeader>
+                <CardTitle>Account type tools</CardTitle>
+                <CardDescription>Add a new type by typing it on an account, or rename a type across existing accounts.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <form action={renameAccountTypeAction} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="rename-account-type-current">Current type</Label>
+                    <Input id="rename-account-type-current" name="currentType" list="account-type-options" placeholder="TFSA" required />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="rename-account-type-new">New type</Label>
+                    <Input id="rename-account-type-new" name="newType" list="account-type-options" placeholder="Registered TFSA" required />
+                  </div>
+                  <Button type="submit" disabled={accounts.length === 0}>
+                    <Save data-icon="inline-start" />
+                    Rename type
+                  </Button>
+                </form>
+                <div className="flex flex-wrap gap-2">
+                  {accountTypes.map((type) => (
+                    <Badge key={type} variant="secondary">
+                      {type}
+                    </Badge>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </section>
 
           <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
             <Card>
@@ -422,7 +503,7 @@ export default async function AdminPage() {
                           </div>
                         </TableCell>
                         <TableCell className="text-right">
-                          <DeleteButton kind="institutions" id={institution.id} />
+                          <DeleteRecordButton kind="institutions" id={institution.id} />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -454,7 +535,7 @@ export default async function AdminPage() {
                         <TableCell>{account.name}</TableCell>
                         <TableCell>{account.type}</TableCell>
                         <TableCell className="text-right">
-                          <DeleteButton kind="accounts" id={account.id} />
+                          <DeleteRecordButton kind="accounts" id={account.id} />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -495,7 +576,7 @@ export default async function AdminPage() {
                         <TableCell className="text-right">{currency(record.amountInvested, record.currencyCode)}</TableCell>
                         <TableCell className="text-right">{currency(record.currentValue, record.currencyCode)}</TableCell>
                         <TableCell className="text-right">
-                          <DeleteButton kind="monthlyRecords" id={record.id} />
+                          <DeleteRecordButton kind="monthlyRecords" id={record.id} />
                         </TableCell>
                       </TableRow>
                     );
@@ -587,17 +668,7 @@ export default async function AdminPage() {
                       {isAdmin ? (
                         <TableCell className="text-right">
                           {user.username === session.username ? null : (
-                            <form action={deleteUserAction} className="flex items-center justify-end gap-3">
-                              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <input type="checkbox" name="confirm" required className="size-4 rounded border-border" />
-                                Confirm
-                              </label>
-                              <input type="hidden" name="id" value={user.id} />
-                              <input type="hidden" name="username" value={user.username} />
-                              <Button type="submit" variant="ghost" size="icon" aria-label="Delete user">
-                                <Trash2 data-icon="inline-start" />
-                              </Button>
-                            </form>
+                            <DeleteUserButton id={user.id} username={user.username} currentUsername={session.username} />
                           )}
                         </TableCell>
                       ) : null}
@@ -613,22 +684,6 @@ export default async function AdminPage() {
         </section>
       ) : null}
     </AppShell>
-  );
-}
-
-function DeleteButton({ kind, id }: { kind: "institutions" | "accounts" | "monthlyRecords"; id: string }) {
-  return (
-    <form action={deleteAction} className="flex items-center justify-end gap-3">
-      <label className="flex items-center gap-2 text-xs text-muted-foreground">
-        <input type="checkbox" name="confirm" required className="size-4 rounded border-border" />
-        Confirm
-      </label>
-      <input type="hidden" name="kind" value={kind} />
-      <input type="hidden" name="id" value={id} />
-      <Button type="submit" variant="ghost" size="icon" aria-label="Delete">
-        <Trash2 data-icon="inline-start" />
-      </Button>
-    </form>
   );
 }
 

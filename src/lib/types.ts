@@ -47,6 +47,7 @@ export type AiProvider = "openai-compatible" | "openai" | "anthropic" | "gemini"
 export type AiImportSettings = {
   id: string;
   enabled: boolean;
+  demoEnabled: boolean;
   updatedAt: string;
   updatedBy: string;
 };
@@ -95,7 +96,17 @@ export type AiImportStep = {
   id: string;
   label: string;
   detail: string;
-  status: "pending" | "running" | "complete" | "error";
+  status: "not_started" | "pending" | "running" | "complete" | "error";
+};
+
+export type AiImportFileProgress = {
+  id: string;
+  fileName: string;
+  bytes: number;
+  status: "not_started" | "pending" | "running" | "complete" | "error";
+  detail: string;
+  progress: number;
+  draftCount?: number;
 };
 
 export type AiImportRun = {

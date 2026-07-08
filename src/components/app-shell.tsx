@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { BarChart3, Building2, FileUp, LogIn, LogOut, PanelLeftClose, PanelLeftOpen, Sparkles } from "lucide-react";
 
 import { logoutAction } from "@/app/actions";
@@ -48,12 +48,14 @@ export function AppShell({
   children,
   session,
   initialSidebarCollapsed = false,
-  aiImportEnabled = false
+  aiImportEnabled = false,
+  demoEnabled = true
 }: {
   children: React.ReactNode;
   session?: { username: string; role: UserRole } | null;
   initialSidebarCollapsed?: boolean;
   aiImportEnabled?: boolean;
+  demoEnabled?: boolean;
 }) {
   const isAdmin = session?.role === "admin";
   const isOperator = session?.role === "operator";
@@ -61,6 +63,7 @@ export function AppShell({
   const canOpenAdmin = isAdmin || isOperator || isUserManager;
   const canOpenAiImport = aiImportEnabled && (isAdmin || isOperator);
   const pathname = usePathname();
+  const [isNavigating, setIsNavigating] = useState(false);
   const collapsed = useSyncExternalStore(
     subscribeToSidebar,
     getSidebarSnapshot,
@@ -75,18 +78,32 @@ export function AppShell({
     setSidebarCookie(collapsed);
   }, [collapsed]);
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setIsNavigating(false), 80);
+    return () => window.clearTimeout(timeout);
+  }, [pathname]);
+
+  function markNavigation(href: string) {
+    if (href !== pathname) setIsNavigating(true);
+  }
+
   const navItems = [
     { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
-    { href: "/demo", label: "Demo", icon: Sparkles },
+    ...(demoEnabled ? [{ href: "/demo", label: "Demo", icon: Sparkles }] : []),
     ...(canOpenAdmin ? [{ href: "/admin", label: "Admin", icon: Building2 }] : []),
     ...(canOpenAiImport ? [{ href: "/admin/ai-import", label: "AI Import", icon: FileUp }] : [])
   ];
 
   return (
-    <div className="min-h-screen bg-muted/30">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--muted))_0,transparent_28rem),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.45))] pb-20 md:pb-0">
+      {isNavigating ? (
+        <div className="fixed inset-x-0 top-0 z-50 h-1 overflow-hidden bg-primary/15">
+          <div className="route-progress-bar h-full w-1/2 bg-primary" />
+        </div>
+      ) : null}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 hidden border-r bg-background p-4 transition-[width] duration-200 md:flex md:flex-col",
+          "fixed inset-y-0 left-0 hidden border-r bg-background/92 p-4 shadow-[12px_0_40px_-32px_rgba(15,23,42,0.55)] backdrop-blur transition-[width] duration-200 md:flex md:flex-col",
           collapsed ? "w-20" : "w-64"
         )}
         data-collapsed={collapsed}
@@ -115,9 +132,14 @@ export function AppShell({
                 asChild
                 variant={active ? "secondary" : "ghost"}
                 size={collapsed ? "icon" : "default"}
-                className={cn("relative w-full", collapsed ? "group justify-center" : "justify-start")}
+            className={cn("relative w-full rounded-full", collapsed ? "group justify-center" : "justify-start")}
               >
-                <Link href={item.href} title={collapsed ? item.label : undefined} aria-label={collapsed ? item.label : undefined}>
+                <Link
+                  href={item.href}
+                  title={collapsed ? item.label : undefined}
+                  aria-label={collapsed ? item.label : undefined}
+                  onClick={() => markNavigation(item.href)}
+                >
                   <Icon data-icon={collapsed ? undefined : "inline-start"} />
                   <span className={collapsed ? "sr-only" : undefined}>{item.label}</span>
                   {collapsed ? <SidebarTooltip label={item.label} /> : null}
@@ -181,27 +203,49 @@ export function AppShell({
       </aside>
       <div className={cn("transition-[padding] duration-200", collapsed ? "md:pl-20" : "md:pl-64")}>
         <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b bg-background/95 px-4 backdrop-blur md:hidden">
-          <Link href="/dashboard" className="text-sm font-semibold">
+          <Link href="/dashboard" className="text-sm font-semibold" onClick={() => markNavigation("/dashboard")}>
             Investment Admin
           </Link>
           <div className="flex items-center gap-2">
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/demo">Demo</Link>
-            </Button>
             {canOpenAdmin ? (
               <Button asChild variant="ghost" size="sm">
-                <Link href="/admin">Admin</Link>
+                <Link href="/admin" onClick={() => markNavigation("/admin")}>Admin</Link>
               </Button>
             ) : null}
             {canOpenAiImport ? (
               <Button asChild variant="ghost" size="sm">
-                <Link href="/admin/ai-import">AI Import</Link>
+                <Link href="/admin/ai-import" onClick={() => markNavigation("/admin/ai-import")}>AI Import</Link>
               </Button>
             ) : null}
             <ThemeToggle />
           </div>
         </header>
-        <main className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 md:p-8">{children}</main>
+        <main className="page-transition mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 md:p-8">{children}</main>
+        <nav className="fixed inset-x-3 bottom-3 z-20 flex items-center justify-around rounded-full border bg-background/95 p-2 shadow-[0_18px_44px_-24px_rgba(15,23,42,0.55)] backdrop-blur md:hidden">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const active =
+              pathname === item.href ||
+              pathname?.startsWith(`${item.href}/`) ||
+              (item.href === "/dashboard" && pathname?.startsWith("/drill/"));
+
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-label={item.label}
+                onClick={() => markNavigation(item.href)}
+                className={cn(
+                  "flex min-w-14 flex-col items-center gap-1 rounded-full px-3 py-2 text-[11px] font-medium text-muted-foreground transition-colors",
+                  active && "bg-primary text-primary-foreground"
+                )}
+              >
+                <Icon />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
       </div>
     </div>
   );

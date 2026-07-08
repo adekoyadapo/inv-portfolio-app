@@ -49,7 +49,7 @@ type SparklinePoint = {
 
 export function PortfolioTimelineChart({ data }: { data: TimelinePoint[] }) {
   return (
-    <div className="h-80 w-full">
+    <div className="h-72 w-full sm:h-80">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
           <defs>
@@ -63,8 +63,8 @@ export function PortfolioTimelineChart({ data }: { data: TimelinePoint[] }) {
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-          <XAxis dataKey="month" tickFormatter={monthLabel} tickLine={false} axisLine={false} />
-          <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `$${Number(value) / 1000}k`} />
+          <XAxis dataKey="month" tickFormatter={monthLabel} tickLine={false} axisLine={false} minTickGap={18} tick={{ fontSize: 12 }} />
+          <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `$${Number(value) / 1000}k`} width={48} tick={{ fontSize: 12 }} />
           <Tooltip
             formatter={(value) => [`$${Number(value || 0).toLocaleString()}`, ""]}
             labelFormatter={(label) => monthLabel(String(label))}
@@ -101,13 +101,13 @@ export function PortfolioTimelineChart({ data }: { data: TimelinePoint[] }) {
 
 export function InstitutionBreakdownChart({ data }: { data: BreakdownPoint[] }) {
   return (
-    <div className="h-80 w-full">
+    <div className="h-72 w-full sm:h-80">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-          <XAxis dataKey="name" tickLine={false} axisLine={false} />
-          <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `$${Number(value) / 1000}k`} />
-          <Tooltip formatter={(value) => [`$${Number(value || 0).toLocaleString()}`, ""]} contentStyle={{ borderRadius: 8 }} />
+          <XAxis dataKey="name" tickLine={false} axisLine={false} minTickGap={16} tick={{ fontSize: 12 }} />
+          <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `$${Number(value) / 1000}k`} width={48} tick={{ fontSize: 12 }} />
+          <Tooltip formatter={(value) => [`$${Number(value || 0).toLocaleString()}`, ""]} contentStyle={{ borderRadius: 8, background: "hsl(var(--popover) / 0.96)", borderColor: "hsl(var(--border))" }} />
           <Legend />
           <Bar dataKey="invested" name="Invested" fill="#94a3b8" radius={[4, 4, 0, 0]} />
           <Bar dataKey="currentValue" name="Current value" fill="#22c55e" radius={[4, 4, 0, 0]} />
@@ -128,7 +128,7 @@ export function AllocationDonutChart({
     <div className="h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
-          <Tooltip formatter={(value) => [`$${Number(value || 0).toLocaleString()}`, "Current value"]} contentStyle={{ borderRadius: 8 }} />
+          <Tooltip formatter={(value) => [`$${Number(value || 0).toLocaleString()}`, "Current value"]} contentStyle={{ borderRadius: 8, background: "hsl(var(--popover) / 0.96)", borderColor: "hsl(var(--border))" }} />
           <Legend />
           <Pie
             data={data}
@@ -154,12 +154,12 @@ export function MomDeltaBarChart({ data }: { data: MomPoint[] }) {
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-          <XAxis dataKey="month" tickFormatter={monthLabel} tickLine={false} axisLine={false} />
-          <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `$${Number(value) / 1000}k`} />
+          <XAxis dataKey="month" tickFormatter={monthLabel} tickLine={false} axisLine={false} minTickGap={18} tick={{ fontSize: 12 }} />
+          <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `$${Number(value) / 1000}k`} width={48} tick={{ fontSize: 12 }} />
           <Tooltip
             formatter={(value) => [`$${Number(value || 0).toLocaleString()}`, "MoM change"]}
             labelFormatter={(label) => monthLabel(String(label))}
-            contentStyle={{ borderRadius: 8 }}
+            contentStyle={{ borderRadius: 8, background: "hsl(var(--popover) / 0.96)", borderColor: "hsl(var(--border))" }}
           />
           <Bar dataKey="momDelta" name="MoM change" fill="#2563eb" radius={[4, 4, 0, 0]} />
         </BarChart>
@@ -174,9 +174,9 @@ export function AccountValueBarChart({ data }: { data: AccountPoint[] }) {
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-          <XAxis dataKey="name" tickLine={false} axisLine={false} />
-          <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `$${Number(value) / 1000}k`} />
-          <Tooltip formatter={(value) => [`$${Number(value || 0).toLocaleString()}`, ""]} contentStyle={{ borderRadius: 8 }} />
+          <XAxis dataKey="name" tickLine={false} axisLine={false} minTickGap={16} tick={{ fontSize: 12 }} />
+          <YAxis tickLine={false} axisLine={false} tickFormatter={(value) => `$${Number(value) / 1000}k`} width={48} tick={{ fontSize: 12 }} />
+          <Tooltip formatter={(value) => [`$${Number(value || 0).toLocaleString()}`, ""]} contentStyle={{ borderRadius: 8, background: "hsl(var(--popover) / 0.96)", borderColor: "hsl(var(--border))" }} />
           <Legend />
           <Bar dataKey="invested" name="Invested" fill="#94a3b8" radius={[4, 4, 0, 0]} />
           <Bar dataKey="currentValue" name="Current value" fill="#2563eb" radius={[4, 4, 0, 0]} />

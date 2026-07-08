@@ -24,14 +24,18 @@ import {
   createAiImportRun,
   findAiImportRunByFingerprint,
   findAccountByKey,
+  findAccountByLooseKey,
   findInstitutionByName,
+  findInstitutionByLooseName,
   findMonthlyRecordByAccountMonth,
   saveAiImportSettings,
+  saveDemoSettings,
   upsertAccount,
   upsertInstitution,
   upsertMonthlyRecord
 } from "@/lib/elasticsearch";
 import { deleteObject, uploadLogo } from "@/lib/object-storage";
+import { logServerEvent, serializeError } from "@/lib/logger";
 import type { AiImportBatch } from "@/lib/types";
 
 const institutionSchema = z.object({
@@ -48,6 +52,11 @@ const accountSchema = z.object({
   institutionId: z.string().min(1, "Institution is required"),
   name: z.string().min(1, "Account name is required"),
   type: z.string().min(1, "Account type is required")
+});
+
+const accountTypeRenameSchema = z.object({
+  currentType: z.string().trim().min(1, "Current account type is required"),
+  newType: z.string().trim().min(1, "New account type is required")
 });
 
 const monthlyRecordSchema = z.object({
@@ -70,6 +79,10 @@ const userSchema = z.object({
 });
 
 const aiImportSettingsSchema = z.object({
+  enabled: z.coerce.boolean()
+});
+
+const demoSettingsSchema = z.object({
   enabled: z.coerce.boolean()
 });
 
@@ -198,6 +211,33 @@ export async function saveAccountAction(formData: FormData) {
   revalidatePath("/drill");
 }
 
+export async function renameAccountTypeAction(formData: FormData) {
+  await assertSameOrigin();
+  await requireAdminOrOperator();
+  const parsed = accountTypeRenameSchema.parse({
+    currentType: formData.get("currentType"),
+    newType: formData.get("newType")
+  });
+  const current = parsed.currentType.trim().toLowerCase();
+  const accounts = await listAccounts();
+  const matchingAccounts = accounts.filter((account) => account.type.trim().toLowerCase() === current);
+
+  await Promise.all(
+    matchingAccounts.map((account) =>
+      upsertAccount({
+        id: account.id,
+        institutionId: account.institutionId,
+        name: account.name,
+        type: parsed.newType
+      })
+    )
+  );
+
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  revalidatePath("/drill");
+}
+
 export async function saveMonthlyRecordAction(formData: FormData) {
   await assertSameOrigin();
   await requireAdminOrOperator();
@@ -220,20 +260,32 @@ export async function saveMonthlyRecordAction(formData: FormData) {
   revalidatePath("/drill");
 }
 
-export async function deleteAction(formData: FormData) {
+export async function deleteAction(
+  _previousState: { status: "idle" | "deleted"; error?: string } | null,
+  formData: FormData
+): Promise<{ status: "idle" | "deleted"; error?: string }>;
+export async function deleteAction(formData: FormData): Promise<{ status: "idle" | "deleted"; error?: string }>;
+export async function deleteAction(arg1: FormData | { status: "idle" | "deleted"; error?: string } | null, arg2?: FormData) {
   await assertSameOrigin();
   await requireAdminOrOperator();
+  const formData = arg2 ?? arg1;
+  if (!(formData instanceof FormData)) {
+    return { status: "idle" as const, error: "Invalid deletion submission." };
+  }
   if (formData.get("confirm") !== "on") {
-    throw new Error("Confirm deletion before continuing.");
+    return { status: "idle" as const, error: "Confirm deletion before continuing." };
   }
   const kind = String(formData.get("kind"));
   const id = String(formData.get("id"));
-  if (!["institutions", "accounts", "monthlyRecords"].includes(kind) || !id) return;
+  if (!["institutions", "accounts", "monthlyRecords"].includes(kind) || !id) {
+    return { status: "idle" as const, error: "Choose a record before deleting." };
+  }
 
   await deleteDocument(kind as "institutions" | "accounts" | "monthlyRecords", id);
   revalidatePath("/admin");
   revalidatePath("/dashboard");
   revalidatePath("/drill");
+  return { status: "deleted" as const };
 }
 
 export async function createUserAction(formData: FormData) {
@@ -254,19 +306,31 @@ export async function createUserAction(formData: FormData) {
   revalidatePath("/users");
 }
 
-export async function deleteUserAction(formData: FormData) {
+export async function deleteUserAction(
+  _previousState: { status: "idle" | "deleted"; error?: string } | null,
+  formData: FormData
+): Promise<{ status: "idle" | "deleted"; error?: string }>;
+export async function deleteUserAction(formData: FormData): Promise<{ status: "idle" | "deleted"; error?: string }>;
+export async function deleteUserAction(arg1: FormData | { status: "idle" | "deleted"; error?: string } | null, arg2?: FormData) {
   await assertSameOrigin();
   const session = await requireAdmin();
+  const formData = arg2 ?? arg1;
+  if (!(formData instanceof FormData)) {
+    return { status: "idle" as const, error: "Invalid deletion submission." };
+  }
   if (formData.get("confirm") !== "on") {
-    throw new Error("Confirm deletion before continuing.");
+    return { status: "idle" as const, error: "Confirm deletion before continuing." };
   }
   const id = String(formData.get("id") || "");
   const username = String(formData.get("username") || "");
-  if (!id || username === session.username) return;
+  if (!id || username === session.username) {
+    return { status: "idle" as const, error: "Cannot delete the active admin user." };
+  }
 
   await deleteUser(id);
   revalidatePath("/admin");
   revalidatePath("/users");
+  return { status: "deleted" as const };
 }
 
 export async function importCsvAction(formData: FormData) {
@@ -287,6 +351,7 @@ type AiImportSettingsActionState = {
   status: "idle" | "saved";
   enabled: boolean;
   saveId: string;
+  error?: string;
 };
 
 export async function saveAiImportSettingsAction(formData: FormData): Promise<AiImportSettingsActionState>;
@@ -295,23 +360,70 @@ export async function saveAiImportSettingsAction(
   formData: FormData
 ): Promise<AiImportSettingsActionState>;
 export async function saveAiImportSettingsAction(arg1: AiImportSettingsActionState | FormData, arg2?: FormData) {
-  await assertSameOrigin();
-  const session = await requireAdmin();
   const formData = arg2 ?? arg1;
-  if (!(formData instanceof FormData)) {
-    throw new Error("Invalid AI import settings submission.");
-  }
-  const parsed = aiImportSettingsSchema.parse({
-    enabled: formData.get("enabled") === "on"
-  });
+  const enabled = formData instanceof FormData ? formData.get("enabled") === "on" : false;
+  try {
+    await assertSameOrigin();
+    const session = await requireAdmin();
+    if (!(formData instanceof FormData)) {
+      throw new Error("Invalid AI import settings submission.");
+    }
+    const parsed = aiImportSettingsSchema.parse({ enabled });
 
-  await saveAiImportSettings({
-    enabled: parsed.enabled,
-    updatedBy: session.username
-  });
-  revalidatePath("/admin");
-  revalidatePath("/admin/ai-import");
-  return { status: "saved" as const, enabled: parsed.enabled, saveId: crypto.randomUUID() };
+    await saveAiImportSettings({
+      enabled: parsed.enabled,
+      updatedBy: session.username
+    });
+    logServerEvent("info", "ai_import_settings_saved", { enabled: parsed.enabled, updatedBy: session.username });
+    revalidatePath("/admin");
+    revalidatePath("/admin/ai-import");
+    revalidatePath("/demo");
+    return { status: "saved" as const, enabled: parsed.enabled, saveId: crypto.randomUUID() };
+  } catch (error) {
+    logServerEvent("error", "ai_import_settings_save_failed", { enabled, error: serializeError(error) });
+    return {
+      status: "idle" as const,
+      enabled,
+      saveId: "",
+      error: error instanceof Error ? error.message : "Unable to save AI import settings."
+    };
+  }
+}
+
+export async function saveDemoSettingsAction(formData: FormData): Promise<AiImportSettingsActionState>;
+export async function saveDemoSettingsAction(
+  _previousState: AiImportSettingsActionState,
+  formData: FormData
+): Promise<AiImportSettingsActionState>;
+export async function saveDemoSettingsAction(arg1: AiImportSettingsActionState | FormData, arg2?: FormData) {
+  const formData = arg2 ?? arg1;
+  const enabled = formData instanceof FormData ? formData.get("enabled") === "on" : false;
+  try {
+    await assertSameOrigin();
+    const session = await requireAdmin();
+    if (!(formData instanceof FormData)) {
+      throw new Error("Invalid demo settings submission.");
+    }
+    const parsed = demoSettingsSchema.parse({ enabled });
+
+    await saveDemoSettings({
+      enabled: parsed.enabled,
+      updatedBy: session.username
+    });
+    logServerEvent("info", "demo_settings_saved", { enabled: parsed.enabled, updatedBy: session.username });
+    revalidatePath("/admin");
+    revalidatePath("/demo");
+    revalidatePath("/dashboard");
+    return { status: "saved" as const, enabled: parsed.enabled, saveId: crypto.randomUUID() };
+  } catch (error) {
+    logServerEvent("error", "demo_settings_save_failed", { enabled, error: serializeError(error) });
+    return {
+      status: "idle" as const,
+      enabled,
+      saveId: "",
+      error: error instanceof Error ? error.message : "Unable to save demo settings."
+    };
+  }
 }
 
 export async function acceptAiImportAction(
@@ -330,7 +442,10 @@ export async function acceptAiImportAction(arg1: AcceptAiImportActionState | For
 
   const existingRun = await findAiImportRunByFingerprint(batch.sourceFingerprint);
   if (existingRun?.status === "applied") {
-    throw new Error("This statement was already imported.");
+    logServerEvent("warn", "ai_import_duplicate_batch_reapplied", {
+      sourceFingerprint: batch.sourceFingerprint,
+      sourceName: batch.sourceName
+    });
   }
 
   const run = await createAiImportRun({
@@ -350,20 +465,36 @@ export async function acceptAiImportAction(arg1: AcceptAiImportActionState | For
       continue;
     }
 
-    const institution = (await findInstitutionByName(draft.institutionName)) || (await upsertInstitution({ name: draft.institutionName }));
-    const account = (await findAccountByKey({
-      institutionId: institution.id,
-      name: draft.accountName,
-      type: draft.accountType
-    })) || (await upsertAccount({
-      institutionId: institution.id,
-      name: draft.accountName,
-      type: draft.accountType
-    }));
+    const institution =
+      (await findInstitutionByName(draft.institutionName)) ||
+      (await findInstitutionByLooseName(draft.institutionName)) ||
+      (await upsertInstitution({ name: draft.institutionName }));
+    const account =
+      (await findAccountByKey({
+        institutionId: institution.id,
+        name: draft.accountName,
+        type: draft.accountType
+      })) ||
+      (await findAccountByLooseKey({
+        institutionId: institution.id,
+        name: draft.accountName,
+        type: draft.accountType
+      })) ||
+      (await upsertAccount({
+        institutionId: institution.id,
+        name: draft.accountName,
+        type: draft.accountType
+      }));
 
     const existingRecord = await findMonthlyRecordByAccountMonth(account.id, draft.month);
     if (existingRecord) {
       skippedCount += 1;
+      logServerEvent("info", "ai_import_monthly_record_skipped_duplicate", {
+        accountId: account.id,
+        accountName: account.name,
+        month: draft.month,
+        sourceFingerprint: draft.sourceFingerprint
+      });
       continue;
     }
 
@@ -390,6 +521,14 @@ export async function acceptAiImportAction(arg1: AcceptAiImportActionState | For
   revalidatePath("/admin/ai-import");
   revalidatePath("/dashboard");
   revalidatePath("/drill");
+
+  logServerEvent("info", "ai_import_batch_applied", {
+    sourceFingerprint: batch.sourceFingerprint,
+    sourceName: batch.sourceName,
+    savedCount,
+    skippedCount,
+    createdBy: session.username
+  });
 
   return {
     status: "saved" as const,

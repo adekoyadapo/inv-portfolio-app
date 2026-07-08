@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { acceptAiImportAction } from "@/app/actions";
 import { getSession } from "@/lib/auth";
+import { logServerEvent, serializeError } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
   const session = await getSession();
@@ -27,6 +28,10 @@ export async function POST(request: NextRequest) {
     const result = await acceptAiImportAction(null, formData);
     return Response.json(result);
   } catch (error) {
+    logServerEvent("error", "ai_import_accept_failed", {
+      username: session.username,
+      error: serializeError(error)
+    });
     return Response.json(
       { error: error instanceof Error ? error.message : "Unable to save the import." },
       { status: 400 }

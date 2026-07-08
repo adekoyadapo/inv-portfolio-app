@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import * as XLSX from "xlsx";
 
 import { extractPdfText } from "@/lib/pdf-extract";
-import type { AiImportBatch, AiImportDraft, AiImportStep, AiRuntimeCredentials } from "@/lib/types";
+import type { AiImportBatch, AiImportDraft, AiImportFileProgress, AiImportStep, AiRuntimeCredentials } from "@/lib/types";
 
 type AnalyzeInput = {
   fileName: string;
@@ -13,6 +13,7 @@ type AnalyzeInput = {
   bytes: Buffer;
   config: AiRuntimeCredentials;
   onStep?: (step: AiImportStep) => void;
+  onFile?: (file: AiImportFileProgress) => void;
 };
 
 const analysisSystemPrompt = [
@@ -43,6 +44,10 @@ const analysisSystemPrompt = [
   "}",
   "Never combine multiple accounts into one summary.",
   "If multiple account groups are present, return one draft per account group.",
+  "Registered plan labels such as DPSP, RRSP, TFSA, RESP, FHSA, RRIF, LIRA, and LIF are distinct accounts even when they share the same plan or account number.",
+  "If a statement summary table has separate DPSP and RRSP rows, return separate DPSP and RRSP drafts for the same month.",
+  "Use stable account names across months. If an account number or masked account number is visible, include the account type and last visible digits in accountName.",
+  "For statements from the same institution, keep accountName consistent even when source titles vary month to month.",
   "Never use placeholders like 'Unknown' unless no name exists anywhere in the source.",
   "Never invent values that are not present.",
   "If the source is ambiguous, lower confidence and add a note.",
@@ -98,6 +103,102 @@ export async function analyzeInvestmentStatement(input: AnalyzeInput) {
     "complete"
   );
   return batch;
+}
+
+export async function analyzeInvestmentStatements(inputs: AnalyzeInput[]) {
+  if (inputs.length === 0) {
+    throw new Error("Choose at least one PDF, image, or spreadsheet export before analyzing.");
+  }
+
+  if (inputs.length === 1) {
+    const input = inputs[0];
+    input.onFile?.({
+      id: fileProgressId(input.fileName, 0),
+      fileName: input.fileName,
+      bytes: input.bytes.length,
+      status: "running",
+      detail: "Processing statement.",
+      progress: 35
+    });
+    const batch = await analyzeInvestmentStatement(input);
+    input.onFile?.({
+      id: fileProgressId(input.fileName, 0),
+      fileName: input.fileName,
+      bytes: input.bytes.length,
+      status: "complete",
+      detail: `${batch.drafts.length} summary row${batch.drafts.length === 1 ? "" : "s"} extracted.`,
+      progress: 100,
+      draftCount: batch.drafts.length
+    });
+    return batch;
+  }
+
+  const batches: AiImportBatch[] = [];
+  for (const [index, input] of inputs.entries()) {
+    input.onFile?.({
+      id: fileProgressId(input.fileName, index),
+      fileName: input.fileName,
+      bytes: input.bytes.length,
+      status: "running",
+      detail: `Processing file ${index + 1} of ${inputs.length}.`,
+      progress: 35
+    });
+    await stage(
+      input.onStep,
+      "read",
+      "Read source batch",
+      `Analyzing ${input.fileName} (${index + 1} of ${inputs.length}).`
+    );
+    const batch = await analyzeInvestmentStatement(input);
+    batches.push(batch);
+    input.onFile?.({
+      id: fileProgressId(input.fileName, index),
+      fileName: input.fileName,
+      bytes: input.bytes.length,
+      status: "complete",
+      detail: `${batch.drafts.length} summary row${batch.drafts.length === 1 ? "" : "s"} extracted.`,
+      progress: 100,
+      draftCount: batch.drafts.length
+    });
+  }
+
+  const sourceTypes = Array.from(new Set(batches.map((batch) => batch.sourceType)));
+  const sourceFingerprint = fingerprintText(batches.map((batch) => batch.sourceFingerprint).sort().join("|"));
+  const sourceName =
+    inputs.length <= 3
+      ? inputs.map((input) => input.fileName).join(", ")
+      : `${inputs.length} statement files`;
+  const drafts = batches.flatMap((batch) =>
+    batch.drafts.map((draft) => ({
+      ...draft,
+      sourceFingerprint: draft.sourceFingerprint || batch.sourceFingerprint,
+      notes: Array.from(new Set([...draft.notes, `Imported from ${draft.sourceName || batch.sourceName}.`]))
+    }))
+  );
+
+  const batch = finalizeBatch({
+    sourceName,
+    sourceType: sourceTypes.length === 1 ? sourceTypes[0] : "text",
+    sourceFingerprint,
+    notes: [
+      `Analyzed ${inputs.length} statement file${inputs.length === 1 ? "" : "s"} as one review batch.`,
+      ...batches.flatMap((item) => item.notes)
+    ],
+    drafts
+  });
+
+  emitStep(
+    inputs[0].onStep,
+    "review",
+    "Ready for review",
+    `${batch.drafts.length} summary row${batch.drafts.length === 1 ? "" : "s"} ready across ${inputs.length} files.`,
+    "complete"
+  );
+  return batch;
+}
+
+export function fileProgressId(fileName: string, index: number) {
+  return `${index}:${fileName}`;
 }
 
 function detectSourceType(mimeType: string, fileName: string): AiImportBatch["sourceType"] {
@@ -172,6 +273,7 @@ function buildPrompt(input: { fileName: string; sourceType: AiImportBatch["sourc
     input.extractedText ? `Extracted source text:\n${input.extractedText}` : "No extracted text was available.",
     "Return one draft per account group and per month that is visible in the source.",
     "If the source contains separate account sections, split them into separate drafts.",
+    "If account numbers are visible, use the same account naming pattern across all months, for example 'TFSA 1234' or 'RRSP 9876'.",
     "If the source is a spreadsheet or export with one row per account/month, keep one draft per grouped account/month.",
     "Do not merge different accounts into one summary."
   ].join("\n\n");
@@ -422,8 +524,8 @@ function normalizeDraft(
 ): AiImportDraft {
   const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const institutionName = normalizeText(String(value.institutionName || "")) || guessInstitutionFromText(extractedText.split(/\r?\n/).find(Boolean) || fileName);
-  const accountName = buildAccountName(String(value.accountName || ""), extractedText);
   const accountType = buildAccountType(String(value.accountType || ""), extractedText);
+  const accountName = buildAccountName(String(value.accountName || ""), extractedText, accountType);
   const month = normalizeMonth(String(value.month || "")) || extractLatestMonth(extractedText) || currentMonth();
   const currencyCode = normalizeCurrencyCode(String(value.currencyCode || "")) || detectCurrencyCode(extractedText) || "USD";
   const amountInvested = normalizeNumber(value.amountInvested);
@@ -512,7 +614,11 @@ function buildFallbackDraft(
     notes: [reason],
     sourceFingerprint,
     institutionName,
-    accountName: buildAccountName(findFirstMatch(extractedText, /\b(?:account|portfolio|plan)\s*[:\-]\s*([A-Za-z0-9 &()/.-]{3,})/i), extractedText),
+    accountName: buildAccountName(
+      findFirstMatch(extractedText, /\b(?:account|portfolio|plan)\s*[:\-]\s*([A-Za-z0-9 &()/.-]{3,})/i),
+      extractedText,
+      buildAccountType("Summary", extractedText)
+    ),
     accountType: buildAccountType("Summary", extractedText),
     month,
     currencyCode,
@@ -550,6 +656,13 @@ async function buildSpreadsheetBatch(input: {
     .filter((row): row is NonNullable<ReturnType<typeof normalizeSpreadsheetRow>> => Boolean(row));
 
   if (summaryRows.length > 0) {
+    emitStep(
+      input.onStep,
+      "infer",
+      "Structured spreadsheet parser",
+      `Detected ${summaryRows.length} CSV-style summary row${summaryRows.length === 1 ? "" : "s"}; no LLM review was needed.`,
+      "complete"
+    );
     return finalizeSummarySpreadsheetBatch({
       fileName: input.fileName,
       sheetName,
@@ -563,6 +676,13 @@ async function buildSpreadsheetBatch(input: {
     .filter((row): row is NonNullable<ReturnType<typeof normalizeTransactionSpreadsheetRow>> => Boolean(row));
 
   if (transactionRows.length > 0) {
+    emitStep(
+      input.onStep,
+      "infer",
+      "Structured spreadsheet parser",
+      `Detected ${transactionRows.length} transaction row${transactionRows.length === 1 ? "" : "s"}; no LLM review was needed.`,
+      "complete"
+    );
     return finalizeTransactionSpreadsheetBatch({
       fileName: input.fileName,
       sheetName,
@@ -651,6 +771,9 @@ function finalizeTransactionSpreadsheetBatch(input: {
     month: string;
     currencyCode: string;
     amount: number;
+    investedActivity: number;
+    valueActivity: number;
+    tradeCost: number;
     balance?: number;
     transactionDate?: string;
   }>;
@@ -662,8 +785,9 @@ function finalizeTransactionSpreadsheetBatch(input: {
     accountType: string;
     month: string;
     currencyCode: string;
-    amountInvested: number;
-    currentValue?: number;
+    monthlyInvested: number;
+    monthlyValueActivity: number;
+    monthlyTradeCost: number;
     netActivity: number;
     lastBalance?: number;
     latestDate: string;
@@ -687,9 +811,10 @@ function finalizeTransactionSpreadsheetBatch(input: {
         accountType: row.accountType,
         month: row.month,
         currencyCode: row.currencyCode,
-        amountInvested: 0,
+        monthlyInvested: 0,
+        monthlyValueActivity: 0,
+        monthlyTradeCost: 0,
         netActivity: 0,
-        currentValue: undefined,
         lastBalance: undefined,
         latestDate: "",
         rowCount: 0,
@@ -698,50 +823,76 @@ function finalizeTransactionSpreadsheetBatch(input: {
 
     existing.rowCount += 1;
     existing.netActivity += row.amount;
-    if (row.amount > 0) {
-      existing.amountInvested += row.amount;
-    }
+    existing.monthlyInvested += row.investedActivity;
+    existing.monthlyValueActivity += row.valueActivity;
+    existing.monthlyTradeCost += row.tradeCost;
 
     const candidateBalance = typeof row.balance === "number" && Number.isFinite(row.balance) ? row.balance : undefined;
     if (candidateBalance !== undefined) {
       if (!existing.latestDate || !row.transactionDate || row.transactionDate >= existing.latestDate) {
         existing.lastBalance = candidateBalance;
-        existing.currentValue = candidateBalance;
         existing.latestDate = row.transactionDate || existing.latestDate;
       }
-    } else {
-      existing.currentValue = Math.max((existing.currentValue || 0) + row.amount, 0);
     }
     grouped.set(key, existing);
   }
 
-  const drafts = Array.from(grouped.values()).map((row) => ({
-    sourceName: input.fileName,
-    sourceType: "spreadsheet" as const,
-    summary: `${row.institutionName} ${row.accountName} summary for ${row.month} with a current value of ${formatMoney(row.currentValue ?? 0, row.currencyCode)}.`,
-    notes: [
-      ...row.notes,
-      `Grouped ${row.rowCount} transaction${row.rowCount === 1 ? "" : "s"} for this account and month.`,
-      row.lastBalance !== undefined
-        ? "The export included a balance column; the latest available value was used for the month summary."
-        : "No balance column was present in the export; current value was inferred from monthly transaction activity."
-    ],
-    sourceFingerprint: input.sourceFingerprint,
-    institutionName: row.institutionName,
-    accountName: row.accountName,
-    accountType: row.accountType,
-    month: row.month,
-    currencyCode: row.currencyCode,
-    amountInvested: row.amountInvested,
-    currentValue: row.currentValue ?? 0,
-    confidence: 0.72,
-    selected: true
-  }));
+  const running = new Map<string, { amountInvested: number; currentValue: number }>();
+  const drafts = Array.from(grouped.values())
+    .sort((left, right) => {
+      const leftKey = `${left.institutionName}|${left.accountName}|${left.accountType}|${left.currencyCode}|${left.month}`;
+      const rightKey = `${right.institutionName}|${right.accountName}|${right.accountType}|${right.currencyCode}|${right.month}`;
+      return leftKey.localeCompare(rightKey);
+    })
+    .map((row) => {
+      const runningKey = draftKey({
+        institutionName: row.institutionName,
+        accountName: row.accountName,
+        accountType: row.accountType,
+        month: "",
+        currencyCode: row.currencyCode
+      });
+      const previous = running.get(runningKey) || { amountInvested: 0, currentValue: 0 };
+      const investedActivity = row.monthlyInvested > 0 ? row.monthlyInvested : row.monthlyTradeCost;
+      const amountInvested = Math.max(previous.amountInvested + investedActivity, 0);
+      const currentValue =
+        row.lastBalance !== undefined
+          ? row.lastBalance
+          : amountInvested;
+      running.set(runningKey, { amountInvested, currentValue });
+
+      return {
+        sourceName: input.fileName,
+        sourceType: "spreadsheet" as const,
+        summary: `${row.institutionName} ${row.accountName} ${row.month} snapshot: ${formatMoney(amountInvested, row.currencyCode)} invested, ${formatMoney(currentValue, row.currencyCode)} current value.`,
+        notes: [
+          ...row.notes,
+          `Grouped ${row.rowCount} transaction${row.rowCount === 1 ? "" : "s"} for this account and month.`,
+          row.lastBalance !== undefined
+            ? "The export included a balance column; the latest available value was used for the month summary."
+            : "No balance column was present; current value was set to the invested amount to avoid inventing a synthetic gain or loss."
+        ],
+        sourceFingerprint: input.sourceFingerprint,
+        institutionName: row.institutionName,
+        accountName: row.accountName,
+        accountType: row.accountType,
+        month: row.month,
+        currencyCode: row.currencyCode,
+        amountInvested,
+        currentValue,
+        confidence: row.lastBalance !== undefined ? 0.78 : 0.68,
+        selected: true
+      };
+    })
+    .filter((draft) => draft.amountInvested > 0 || draft.currentValue > 0);
 
   return finalizeBatch({
     sourceName: input.fileName,
     sourceType: "spreadsheet",
-    notes: [`Parsed ${input.rows.length} transaction row${input.rows.length === 1 ? "" : "s"}.`],
+    notes: [
+      `Parsed ${input.rows.length} transaction row${input.rows.length === 1 ? "" : "s"}.`,
+      "Generated CSV-compatible monthly snapshots from transaction history."
+    ],
     sourceFingerprint: input.sourceFingerprint,
     drafts
   });
@@ -769,12 +920,13 @@ function normalizeTransactionSpreadsheetRow(row: Record<string, unknown>) {
   const institutionName = normalizeText(String(readAlias(row, ["institution_name", "institution", "bank", "provider", "institution name"])) || "") || "Imported institution";
   const accountNumber = normalizeText(String(readAlias(row, ["account #", "account_number", "account number", "account id", "account"])) || "");
   const accountType = normalizeText(String(readAlias(row, ["account_type", "type", "category", "account type"])) || "") || "Summary";
-  const transactionDateRaw = String(readAlias(row, ["transaction_date", "trade_date", "posted_date", "date", "activity_date"]) || "");
+  const transactionDateRaw = String(readAlias(row, ["transaction_date", "transaction date", "trade_date", "trade date", "posted_date", "posted date", "date", "activity_date", "activity date"]) || "");
   const month = normalizeMonth(transactionDateRaw) || normalizeMonth(String(readAlias(row, ["month", "period", "statement_month"]) || ""));
   const amount = extractSignedAmount(row);
   if (!month || !Number.isFinite(amount)) return null;
 
   const balanceValue = extractNumericField(row, ["running_balance", "ending_balance", "closing_balance", "balance", "market_value", "current_value", "current value", "value"]);
+  const classification = classifyTransactionActivity(row, amount);
   return {
     institutionName,
     accountName: buildTransactionAccountName(accountNumber, accountType, row),
@@ -782,6 +934,9 @@ function normalizeTransactionSpreadsheetRow(row: Record<string, unknown>) {
     month,
     currencyCode: normalizeCurrencyCode(String(readAlias(row, ["currency_code", "currency", "currency code"]) || "")) || "USD",
     amount,
+    investedActivity: classification.investedActivity,
+    valueActivity: classification.valueActivity,
+    tradeCost: classification.tradeCost,
     balance: balanceValue,
     transactionDate: normalizeTransactionDate(transactionDateRaw)
   };
@@ -835,22 +990,67 @@ function extractNumericField(row: Record<string, unknown>, aliases: string[]) {
 }
 
 function signedAmountByContext(value: number, row: Record<string, unknown>) {
-  const actionText = normalizeText(
-    String(readAlias(row, ["action", "activity_type", "activity type", "transaction_type", "transaction type"]) || "")
-  ).toUpperCase();
+  const actionText = transactionContext(row);
   if (/(WITHDRAW|BUY|DEBIT|FEE|PURCHASE|TRANSFER OUT|REDEMPTION|OUTFLOW)/.test(actionText)) {
     return -Math.abs(value);
   }
-  if (/(DEPOSIT|DIV|CREDIT|INTEREST|TRANSFER IN|FX CONVERSION|BONUS|INCOME|REINVEST|SELL|PROCEED)/.test(actionText)) {
+  if (/(CON\b|DEP\b|DEPOSIT|DIV|CREDIT|INTEREST|TRANSFER IN|BONUS|INCOME|REINVEST|SELL|PROCEED)/.test(actionText)) {
     return Math.abs(value);
   }
   return value;
 }
 
+function classifyTransactionActivity(row: Record<string, unknown>, amount: number) {
+  const context = transactionContext(row);
+
+  if (/(BUY|SELL|TRADE|PURCHASE)/.test(context)) {
+    return { investedActivity: 0, valueActivity: 0, tradeCost: Math.abs(amount) };
+  }
+
+  if (/(CON\b|DEP\b|DEPOSIT|TRANSFER IN)/.test(context)) {
+    return {
+      investedActivity: Math.max(amount, 0),
+      valueActivity: amount,
+      tradeCost: 0
+    };
+  }
+
+  if (/(WITHDRAW|EFT\b|TRANSFER OUT|REDEMPTION|OUTFLOW)/.test(context)) {
+    return {
+      investedActivity: -Math.abs(amount),
+      valueActivity: -Math.abs(amount),
+      tradeCost: 0
+    };
+  }
+
+  if (/(DIV|DIVIDEND|INTEREST|INCOME|BONUS)/.test(context)) {
+    return { investedActivity: 0, valueActivity: amount, tradeCost: 0 };
+  }
+
+  if (/(FXT\b|FX CONVERSION)/.test(context)) {
+    return { investedActivity: Math.max(amount, 0), valueActivity: amount, tradeCost: 0 };
+  }
+
+  return { investedActivity: Math.max(amount, 0), valueActivity: amount, tradeCost: 0 };
+}
+
+function transactionContext(row: Record<string, unknown>) {
+  return normalizeText(
+    [
+      readAlias(row, ["action"]),
+      readAlias(row, ["activity_type", "activity type"]),
+      readAlias(row, ["transaction_type", "transaction type"]),
+      readAlias(row, ["description"])
+    ]
+      .map(String)
+      .join(" ")
+  ).toUpperCase();
+}
+
 function buildTransactionAccountName(accountNumber: string, accountType: string, row: Record<string, unknown>) {
   const number = normalizeText(accountNumber);
   if (number) {
-    return `${accountType} ${number}`.trim();
+    return `${accountType} - ${number}`.trim();
   }
 
   const description = normalizeText(String(readAlias(row, ["description", "security", "symbol"]) || ""));
@@ -921,13 +1121,18 @@ function detectCurrencyCode(text: string) {
   return "";
 }
 
-function buildAccountName(value: string, text: string) {
+function buildAccountName(value: string, text: string, accountType = "") {
   const normalized = normalizeText(value);
   if (normalized && !isPlaceholderAccountName(normalized)) return normalized;
 
+  const accountNumber = extractAccountNumber(text);
+  const normalizedType = normalizeText(accountType);
+  if (normalizedType && !isPlaceholderAccountType(normalizedType)) {
+    return accountNumber ? `${normalizedType} ${accountNumber}` : `${normalizedType} summary`;
+  }
+
   const accountGroups = extractAccountGroups(text);
-  if (accountGroups.length === 1) return `${accountGroups[0]} summary`;
-  if (accountGroups.length > 1) return `${accountGroups.join(" / ")} summary`;
+  if (accountGroups.length === 1) return accountNumber ? `${accountGroups[0]} ${accountNumber}` : `${accountGroups[0]} summary`;
 
   const fallback = findFirstMatch(text, /\b(?:account|portfolio|plan)\s*[:\-]\s*([A-Za-z0-9 &()/.-]{3,})/i);
   if (fallback && !isPlaceholderAccountName(fallback)) return fallback;
@@ -969,6 +1174,13 @@ function extractAccountGroups(text: string) {
   ];
 
   return Array.from(new Set(patterns.filter(([pattern]) => pattern.test(text)).map(([, label]) => label)));
+}
+
+function extractAccountNumber(text: string) {
+  const labeled = findFirstMatch(text, /\b(?:account|acct|plan|portfolio)\s*(?:number|no\.?|#)?\s*[:\-#]?\s*([*xX\-\s\d]{4,24})/i);
+  const labeledDigits = labeled.match(/\d{4,}/)?.[0];
+  const looseDigits = text.match(/(?:\*{2,}|x{2,}|X{2,}|-)?\s*(\d{4,8})\b/)?.[1];
+  return (labeledDigits || looseDigits || "").slice(-8);
 }
 
 function isPlaceholderAccountName(value: string) {
@@ -1074,6 +1286,10 @@ function normalizeBaseUrl(provider: AiRuntimeCredentials["provider"], baseUrl?: 
 
 function fingerprintBytes(bytes: Buffer) {
   return createHash("sha256").update(bytes).digest("base64url");
+}
+
+function fingerprintText(value: string) {
+  return createHash("sha256").update(value).digest("base64url");
 }
 
 function sumAllMatches(text: string, pattern: RegExp) {

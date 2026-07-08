@@ -24,7 +24,12 @@ export default async function DashboardPage() {
   }
 
   return (
-    <AppShell session={session} initialSidebarCollapsed={initialSidebarCollapsed} aiImportEnabled={aiImportSettings.enabled}>
+    <AppShell
+      session={session}
+      initialSidebarCollapsed={initialSidebarCollapsed}
+      aiImportEnabled={aiImportSettings.enabled}
+      demoEnabled={aiImportSettings.demoEnabled}
+    >
       {!session && !loadError ? (
         <Card>
           <CardContent className="p-4 text-sm text-muted-foreground">
