@@ -199,6 +199,9 @@ export type HeatmapCell = {
   month: string;
   monthIndex: number;
   delta: number | null;
+  currentValue: number | null;
+  invested: number | null;
+  deltaPercent: number | null;
 };
 
 export type HeatmapRow = {
@@ -207,10 +210,16 @@ export type HeatmapRow = {
 };
 
 export function computeMonthlyReturnHeatmap(data: DashboardData): HeatmapRow[] {
-  const deltaByMonth = new Map<string, number>();
+  const pointByMonth = new Map<string, { currentValue: number; invested: number; delta: number; deltaPercent: number }>();
   data.timeline.forEach((point, index) => {
     const previous = index > 0 ? data.timeline[index - 1] : undefined;
-    deltaByMonth.set(point.month, previous ? point.currentValue - previous.currentValue : 0);
+    const delta = previous ? point.currentValue - previous.currentValue : 0;
+    pointByMonth.set(point.month, {
+      currentValue: point.currentValue,
+      invested: point.invested,
+      delta,
+      deltaPercent: previous && previous.currentValue > 0 ? delta / previous.currentValue : 0
+    });
   });
 
   const years = [...new Set(data.timeline.map((point) => point.month.split("-")[0]))].sort();
@@ -219,10 +228,14 @@ export function computeMonthlyReturnHeatmap(data: DashboardData): HeatmapRow[] {
     year,
     cells: Array.from({ length: 12 }, (_, monthIndex) => {
       const month = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+      const point = pointByMonth.get(month);
       return {
         month,
         monthIndex,
-        delta: deltaByMonth.has(month) ? deltaByMonth.get(month)! : null
+        delta: point ? point.delta : null,
+        currentValue: point ? point.currentValue : null,
+        invested: point ? point.invested : null,
+        deltaPercent: point ? point.deltaPercent : null
       };
     })
   }));
