@@ -9,11 +9,14 @@ import type {
   AiImportRun,
   AiImportSettings,
   AppUser,
+  DataExportDump,
+  DataExportScope,
   Institution,
   MonthlyRecord,
   PublicUser,
   UserRole
 } from "@/lib/types";
+import { DATA_EXPORT_VERSION } from "@/lib/types";
 
 const indices = {
   institutions: "institutions",
@@ -134,6 +137,33 @@ async function searchAll<T>(index: string, sort: Array<Record<string, string>>) 
     query: { match_all: {} }
   });
   return response.hits.hits.map((hit) => hit._source).filter(Boolean) as T[];
+}
+
+// Paginates past the 1000-document cap on searchAll, for export use cases where completeness matters more than a single round trip.
+async function fetchAllDocuments<T>(index: string, sort: Array<Record<string, string>>) {
+  await ensureIndices();
+  const pageSize = 1000;
+  const documents: T[] = [];
+  let searchAfter: estypes.SortResults | undefined;
+
+  for (;;) {
+    const response = await elasticClient().search<T>({
+      index,
+      size: pageSize,
+      sort,
+      query: { match_all: {} },
+      ...(searchAfter ? { search_after: searchAfter } : {})
+    });
+    const hits = response.hits.hits;
+    if (hits.length === 0) break;
+    for (const hit of hits) {
+      if (hit._source) documents.push(hit._source);
+    }
+    if (hits.length < pageSize) break;
+    searchAfter = hits[hits.length - 1].sort;
+  }
+
+  return documents;
 }
 
 export async function listInstitutions() {
@@ -552,4 +582,72 @@ function similarityScore(left: string, right: string) {
   if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
   const intersection = Array.from(leftTokens).filter((token) => rightTokens.has(token)).length;
   return intersection / Math.max(leftTokens.size, rightTokens.size);
+}
+
+async function bulkUpsertDocuments<T extends { id: string }>(index: string, documents: T[]) {
+  if (documents.length === 0) return 0;
+  await ensureIndices();
+  const chunkSize = 500;
+  let imported = 0;
+
+  for (let i = 0; i < documents.length; i += chunkSize) {
+    const chunk = documents.slice(i, i + chunkSize);
+    const operations = chunk.flatMap((document) => [{ index: { _index: index, _id: document.id } }, document]);
+    await elasticClient().bulk({ operations, refresh: false });
+    imported += chunk.length;
+  }
+
+  await elasticClient().indices.refresh({ index });
+  return imported;
+}
+
+export async function exportPortfolioData(): Promise<DataExportDump["data"]> {
+  const [institutions, accounts, monthlyRecords] = await Promise.all([
+    fetchAllDocuments<Institution>(indices.institutions, [{ "name.keyword": "asc" }, { id: "asc" }]),
+    fetchAllDocuments<Account>(indices.accounts, [{ "name.keyword": "asc" }, { id: "asc" }]),
+    fetchAllDocuments<MonthlyRecord>(indices.monthlyRecords, [{ month: "asc" }, { id: "asc" }])
+  ]);
+  return { institutions, accounts, monthlyRecords };
+}
+
+export async function exportFullData(): Promise<DataExportDump["data"]> {
+  const [portfolio, users, aiSettings, aiImportRuns] = await Promise.all([
+    exportPortfolioData(),
+    fetchAllDocuments<AppUser>(indices.users, [{ username: "asc" }, { id: "asc" }]),
+    fetchAllDocuments<AiImportSettings>(indices.aiSettings, [{ id: "asc" }]),
+    fetchAllDocuments<AiImportRun>(indices.aiImportRuns, [{ createdAt: "asc" }, { id: "asc" }])
+  ]);
+  return { ...portfolio, users, aiSettings, aiImportRuns };
+}
+
+export async function buildDataExport(scope: DataExportScope): Promise<DataExportDump> {
+  const data = scope === "full" ? await exportFullData() : await exportPortfolioData();
+  return {
+    version: DATA_EXPORT_VERSION,
+    scope,
+    exportedAt: new Date().toISOString(),
+    data
+  };
+}
+
+export type DataImportSummary = {
+  institutions: number;
+  accounts: number;
+  monthlyRecords: number;
+  users: number;
+  aiSettings: number;
+  aiImportRuns: number;
+};
+
+export async function importDataDump(dump: DataExportDump): Promise<DataImportSummary> {
+  await ensureIndices();
+  const [institutions, accounts, monthlyRecords, users, aiSettings, aiImportRuns] = await Promise.all([
+    bulkUpsertDocuments(indices.institutions, dump.data.institutions),
+    bulkUpsertDocuments(indices.accounts, dump.data.accounts),
+    bulkUpsertDocuments(indices.monthlyRecords, dump.data.monthlyRecords),
+    bulkUpsertDocuments(indices.users, dump.data.users || []),
+    bulkUpsertDocuments(indices.aiSettings, dump.data.aiSettings || []),
+    bulkUpsertDocuments(indices.aiImportRuns, dump.data.aiImportRuns || [])
+  ]);
+  return { institutions, accounts, monthlyRecords, users, aiSettings, aiImportRuns };
 }

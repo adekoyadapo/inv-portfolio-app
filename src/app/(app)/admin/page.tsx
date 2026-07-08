@@ -17,6 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataMigrationCard } from "@/components/data-migration-card";
 import { DemoFeatureToggleCard } from "@/components/demo-feature-toggle-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -261,6 +262,8 @@ export default async function AdminPage({
           <DemoFeatureToggleCard enabled={aiImportSettings.demoEnabled} />
         </section>
       ) : null}
+
+      {isAdmin ? <DataMigrationCard /> : null}
 
       {canEditPortfolio ? (
         <>

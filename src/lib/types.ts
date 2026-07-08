@@ -184,3 +184,21 @@ export type DrilldownData = DashboardData & {
     gainLoss: number;
   }>;
 };
+
+export const DATA_EXPORT_VERSION = 1;
+
+export type DataExportScope = "portfolio" | "full";
+
+export type DataExportDump = {
+  version: number;
+  scope: DataExportScope;
+  exportedAt: string;
+  data: {
+    institutions: Institution[];
+    accounts: Account[];
+    monthlyRecords: MonthlyRecord[];
+    users?: AppUser[];
+    aiSettings?: AiImportSettings[];
+    aiImportRuns?: AiImportRun[];
+  };
+};
