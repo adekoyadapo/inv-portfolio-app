@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
 
   const settings = await getAiImportSettings();
   if (!settings.enabled) {
-    return Response.json({ error: "AI import is disabled by an administrator." }, { status: 409 });
+    return Response.json({ error: "Smart Import is disabled by an administrator." }, { status: 409 });
   }
   const runtimeConfig = getAiRuntimeCredentials();
   if (!runtimeConfig.apiKey) {

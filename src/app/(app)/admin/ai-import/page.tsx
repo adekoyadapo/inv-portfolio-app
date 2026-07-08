@@ -17,7 +17,7 @@ export default async function AiImportPage() {
           <Bot />
         </div>
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-normal">AI import</h1>
+          <h1 className="text-2xl font-semibold tracking-normal">Smart Import</h1>
           <p className="text-sm text-muted-foreground">
             Upload a statement or spreadsheet export, watch the model split the accounts into review rows, and accept the rows you want to save.
           </p>
@@ -27,7 +27,7 @@ export default async function AiImportPage() {
       {!settings.enabled ? (
         <Card className="border-amber-500/30 bg-amber-500/5">
           <CardContent className="p-4 text-sm text-amber-700 dark:text-amber-300">
-            AI import is disabled globally. Enable it in the settings panel below to allow statement analysis.
+            Smart Import is disabled globally. Enable it in the settings panel below to allow statement analysis.
           </CardContent>
         </Card>
       ) : null}

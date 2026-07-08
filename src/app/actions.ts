@@ -374,7 +374,7 @@ export async function saveAiImportSettingsAction(arg1: AiImportSettingsActionSta
     await assertSameOrigin();
     const session = await requireAdmin();
     if (!(formData instanceof FormData)) {
-      throw new Error("Invalid AI import settings submission.");
+      throw new Error("Invalid Smart Import settings submission.");
     }
     const parsed = aiImportSettingsSchema.parse({ enabled });
 
@@ -393,7 +393,7 @@ export async function saveAiImportSettingsAction(arg1: AiImportSettingsActionSta
       status: "idle" as const,
       enabled,
       saveId: "",
-      error: error instanceof Error ? error.message : "Unable to save AI import settings."
+      error: error instanceof Error ? error.message : "Unable to save Smart Import settings."
     };
   }
 }
@@ -444,7 +444,7 @@ export async function acceptAiImportAction(arg1: AcceptAiImportActionState | For
   const session = await requireAdminOrOperator();
   const formData = arg2 ?? arg1;
   if (!(formData instanceof FormData)) {
-    throw new Error("Invalid AI import submission.");
+    throw new Error("Invalid Smart Import submission.");
   }
   const batch = aiImportBatchSchema.parse(JSON.parse(String(formData.get("draft") || "{}"))) as AiImportBatch;
 

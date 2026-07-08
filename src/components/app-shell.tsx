@@ -91,7 +91,7 @@ export function AppShell({
     : [
         { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
         ...(canOpenAdmin ? [{ href: "/admin", label: "Admin", icon: Building2 }] : []),
-        ...(canOpenAiImport ? [{ href: "/admin/ai-import", label: "AI Import", icon: FileUp }] : [])
+        ...(canOpenAiImport ? [{ href: "/admin/ai-import", label: "Smart Import", icon: FileUp }] : [])
       ];
 
   return (
@@ -218,7 +218,7 @@ export function AppShell({
             ) : null}
             {!isDemoRoute && canOpenAiImport ? (
               <Button asChild variant="ghost" size="sm">
-                <Link href="/admin/ai-import" onClick={() => markNavigation("/admin/ai-import")}>AI Import</Link>
+                <Link href="/admin/ai-import" onClick={() => markNavigation("/admin/ai-import")}>Smart Import</Link>
               </Button>
             ) : null}
             <ThemeToggle />

@@ -12,13 +12,13 @@ export function AiFeatureToggleCard({
 }) {
   return (
     <FeatureToggleCard
-      title="AI import feature"
+      title="Smart Import feature"
       description="Turn the statement importer on or off for everyone. This is admin-only."
       enabled={enabled}
-      label="Enable AI import for all users"
+      label="Enable Smart Import for all users"
       settingKey="aiImport"
       icon={<Bot data-icon="inline-start" />}
-      refreshTitle="AI import updated"
+      refreshTitle="Smart Import updated"
       refreshDescription="The new feature flag is saved. Refresh the UI to make sure all panels reflect the updated state."
     >
       <div className="rounded-md border bg-muted/30 p-3 text-sm">

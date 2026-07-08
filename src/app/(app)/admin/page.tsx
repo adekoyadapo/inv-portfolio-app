@@ -224,7 +224,7 @@ export default async function AdminPage({
         <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">Admin</h1>
         <p className="text-sm text-muted-foreground">
           {isAdmin
-            ? "Manage institutions, accounts, month-end values, user access, and AI import controls."
+            ? "Manage institutions, accounts, month-end values, user access, and Smart Import controls."
             : canEditPortfolio
               ? "Manage institutions, accounts, and month-end values."
               : "Manage user access only."}
