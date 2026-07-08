@@ -1,0 +1,141 @@
+services:
+  web:
+    build:
+      context: .
+    ports:
+      - "${WEB_HOST_PORT:-3001}:3000"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    environment:
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-session-secret-change-me}
+      ENFORCE_STRONG_SECRETS: ${ENFORCE_STRONG_SECRETS:-false}
+      ELASTICSEARCH_ENDPOINT: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: elastic
+      ELASTICSEARCH_PASSWORD: ${ELASTIC_PASSWORD:-changeme}
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
+      AI_MODEL: ${AI_MODEL:-gemini-3.5-flash}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      S3_ENDPOINT: seaweedfs-s3
+      S3_PORT: 8333
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_USE_SSL: "false"
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-local-s3-access-key}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-local-s3-secret-key}
+      S3_BUCKET: ${S3_BUCKET:-investment-logos}
+      S3_PUBLIC_URL: ${S3_PUBLIC_URL:-http://localhost:8333}
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      seaweedfs-s3:
+        condition: service_healthy
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-changeme}
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "${ELASTICSEARCH_HOST_PORT:-9201}:9200"
+    volumes:
+      - elasticsearch9-data:/usr/share/elasticsearch/data
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -u elastic:${ELASTIC_PASSWORD:-changeme} http://localhost:9200/_cluster/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  seaweedfs-master:
+    image: chrislusf/seaweedfs:4.38
+    command: master -ip=seaweedfs-master -ip.bind=0.0.0.0
+    ports:
+      - "${SEAWEEDFS_MASTER_HOST_PORT:-9333}:9333"
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs:4.38
+    command: volume -ip=seaweedfs-volume -master=seaweedfs-master:9333 -ip.bind=0.0.0.0 -port=8080
+    volumes:
+      - seaweedfs-volume-data:/data
+    depends_on:
+      - seaweedfs-master
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:4.38
+    command: filer -ip=seaweedfs-filer -master=seaweedfs-master:9333 -ip.bind=0.0.0.0
+    ports:
+      - "${SEAWEEDFS_FILER_HOST_PORT:-8888}:8888"
+    volumes:
+      - seaweedfs-filer-data:/data
+    depends_on:
+      - seaweedfs-master
+      - seaweedfs-volume
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  seaweedfs-s3:
+    image: chrislusf/seaweedfs:4.38
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        cat > /tmp/s3.json <<EOF
+        {
+          "identities": [
+            {
+              "name": "anonymous",
+              "actions": ["Read"]
+            },
+            {
+              "name": "investment-admin",
+              "credentials": [
+                {
+                  "accessKey": "$${S3_ACCESS_KEY}",
+                  "secretKey": "$${S3_SECRET_KEY}"
+                }
+              ],
+              "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+            }
+          ]
+        }
+        EOF
+        exec weed s3 -filer=seaweedfs-filer:8888 -ip.bind=0.0.0.0 -config=/tmp/s3.json
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-local-s3-access-key}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-local-s3-secret-key}
+    ports:
+      - "${S3_HOST_PORT:-8333}:8333"
+    depends_on:
+      - seaweedfs-master
+      - seaweedfs-volume
+      - seaweedfs-filer
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8333"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  elasticsearch9-data:
+  seaweedfs-volume-data:
+  seaweedfs-filer-data:

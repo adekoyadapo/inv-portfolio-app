@@ -1,0 +1,643 @@
+import { AlertCircle, Download, FileUp, ImageUp, Plus, Save, Shield, Trash2, UserPlus } from "lucide-react";
+
+import {
+  createUserAction,
+  deleteAction,
+  deleteUserAction,
+  importCsvAction,
+  saveAccountAction,
+  saveInstitutionAction,
+  saveMonthlyRecordAction,
+  updateInstitutionLogoAction
+} from "@/app/actions";
+import { AiFeatureToggleCard } from "@/components/ai-feature-toggle-card";
+import { AppShell } from "@/components/app-shell";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { requireAdminOrPortfolioAccess } from "@/lib/auth";
+import { getAiImportSettings, listAccounts, listInstitutions, listMonthlyRecords, listUsers } from "@/lib/elasticsearch";
+import { getAiRuntimeConfig } from "@/lib/ai-config";
+import { getInitialSidebarCollapsed } from "@/lib/sidebar";
+import type { Account, Institution, MonthlyRecord, PublicUser } from "@/lib/types";
+import { currency, monthLabel } from "@/lib/utils";
+
+const accountTypes = ["RESP", "RRSP", "TFSA", "Stock", "Index", "Cash", "Other"];
+
+export default async function AdminPage() {
+  const [session, initialSidebarCollapsed, aiImportSettings] = await Promise.all([
+    requireAdminOrPortfolioAccess(),
+    getInitialSidebarCollapsed(),
+    getAiImportSettings()
+  ]);
+  const runtimeConfig = getAiRuntimeConfig();
+  const isAdmin = session.role === "admin";
+  const canEditPortfolio = isAdmin || session.role === "operator";
+  const canManageUsers = isAdmin || session.role === "user_manager";
+
+  let institutions: Institution[] = [];
+  let accounts: Account[] = [];
+  let records: MonthlyRecord[] = [];
+  let users: PublicUser[] = [];
+  let loadError = "";
+
+  try {
+    [institutions, accounts, records, users] = await Promise.all([
+      listInstitutions(),
+      listAccounts(),
+      listMonthlyRecords(),
+      listUsers()
+    ]);
+  } catch (error) {
+    loadError = error instanceof Error ? error.message : "Unable to load admin data.";
+  }
+
+  const institutionName = new Map(institutions.map((institution) => [institution.id, institution.name]));
+  const accountById = new Map(accounts.map((account) => [account.id, account]));
+
+  return (
+    <AppShell
+      session={session}
+      initialSidebarCollapsed={initialSidebarCollapsed}
+      aiImportEnabled={aiImportSettings.enabled}
+    >
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold tracking-normal">Admin</h1>
+        <p className="text-sm text-muted-foreground">
+          {isAdmin
+            ? "Manage institutions, accounts, month-end values, user access, and AI import controls."
+            : canEditPortfolio
+              ? "Manage institutions, accounts, and month-end values."
+              : "Manage user access only."}
+        </p>
+      </div>
+
+      {loadError ? (
+        <Card className="border-destructive/40">
+          <CardContent className="flex items-center gap-3 p-4 text-sm text-destructive">
+            <AlertCircle />
+            {loadError}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {isAdmin ? (
+        <section className="grid gap-4 xl:grid-cols-1">
+          <AiFeatureToggleCard enabled={aiImportSettings.enabled} runtimeConfig={runtimeConfig} />
+        </section>
+      ) : null}
+
+      {canEditPortfolio ? (
+        <>
+          <section className="grid gap-4 xl:grid-cols-3">
+            <Card>
+              <CardHeader>
+                <CardTitle>Institution</CardTitle>
+                <CardDescription>Add a financial institution and upload its logo.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form action={saveInstitutionAction} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="institution-name">Name</Label>
+                    <Input id="institution-name" name="name" placeholder="Wealthsimple" required />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="institution-logo">Logo</Label>
+                    <Input id="institution-logo" name="logo" type="file" accept="image/*" />
+                  </div>
+                  <Button type="submit">
+                    <Plus data-icon="inline-start" />
+                    Save institution
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Account</CardTitle>
+                <CardDescription>Create an account under an institution.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form action={saveAccountAction} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="account-institution">Institution</Label>
+                    <Select name="institutionId" required>
+                      <SelectTrigger id="account-institution">
+                        <SelectValue placeholder="Select institution" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {institutions.map((institution) => (
+                            <SelectItem key={institution.id} value={institution.id}>
+                              {institution.name}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="account-name">Name</Label>
+                    <Input id="account-name" name="name" placeholder="Family RESP" required />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="account-type">Type</Label>
+                    <Select name="type" required>
+                      <SelectTrigger id="account-type">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {accountTypes.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              {type}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button type="submit" disabled={institutions.length === 0}>
+                    <Plus data-icon="inline-start" />
+                    Save account
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly record</CardTitle>
+                <CardDescription>Upsert a month-end invested amount and current value.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form action={saveMonthlyRecordAction} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="record-account">Account</Label>
+                    <Select name="accountId" required>
+                      <SelectTrigger id="record-account">
+                        <SelectValue placeholder="Select account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {accounts.map((account) => (
+                            <SelectItem key={account.id} value={account.id}>
+                              {institutionName.get(account.institutionId)} / {account.name}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="record-month">Month</Label>
+                      <Input id="record-month" name="month" type="month" required />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="record-currency">Currency</Label>
+                      <Select name="currencyCode" defaultValue="USD" required>
+                        <SelectTrigger id="record-currency">
+                          <SelectValue placeholder="Select currency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {["CAD", "USD", "NGN"].map((code) => (
+                              <SelectItem key={code} value={code}>
+                                {code}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="amount-invested">Invested</Label>
+                      <Input id="amount-invested" name="amountInvested" type="number" min="0" step="0.01" required />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="current-value">Current value</Label>
+                    <Input id="current-value" name="currentValue" type="number" min="0" step="0.01" required />
+                  </div>
+                  <Button type="submit" disabled={accounts.length === 0}>
+                    <Plus data-icon="inline-start" />
+                    Save monthly record
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </section>
+
+          <Card className="overflow-hidden border-border/70 bg-gradient-to-b from-background via-background to-muted/20 shadow-[0_18px_44px_-28px_rgba(15,23,42,0.32)] dark:shadow-[0_24px_60px_-34px_rgba(0,0,0,0.82)]">
+            <CardHeader>
+              <CardTitle>Edit accounts</CardTitle>
+              <CardDescription>Update account names and types in place. Changes reflow through the dashboard immediately.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {accounts.length > 0 ? (
+                accounts.map((account) => (
+                  <form
+                    key={account.id}
+                    action={saveAccountAction}
+                    className="grid gap-3 rounded-xl border border-border/70 bg-background/80 p-4 shadow-[0_14px_28px_-22px_rgba(15,23,42,0.28)] lg:grid-cols-[1.1fr_1.2fr_180px_auto]"
+                  >
+                    <input type="hidden" name="id" value={account.id} />
+                    <input type="hidden" name="institutionId" value={account.institutionId} />
+                    <div className="flex flex-col justify-center gap-1">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Institution</p>
+                      <p className="font-medium">{institutionName.get(account.institutionId) || "Unknown"}</p>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label className="sr-only" htmlFor={`edit-account-name-${account.id}`}>
+                        Account name
+                      </Label>
+                      <Input id={`edit-account-name-${account.id}`} name="name" defaultValue={account.name} />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <Label className="sr-only" htmlFor={`edit-account-type-${account.id}`}>
+                        Account type
+                      </Label>
+                      <Select name="type" defaultValue={account.type} required>
+                        <SelectTrigger id={`edit-account-type-${account.id}`}>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {accountTypes.map((type) => (
+                              <SelectItem key={type} value={type}>
+                                {type}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <Button type="submit">
+                        <Save data-icon="inline-start" />
+                        Save
+                      </Button>
+                      <DeleteButton kind="accounts" id={account.id} />
+                    </div>
+                  </form>
+                ))
+              ) : (
+                <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No accounts yet.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Update institution logo</CardTitle>
+                <CardDescription>Replace the logo for an existing institution.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form action={updateInstitutionLogoAction} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="logo-institution">Institution</Label>
+                    <Select name="institutionId" required>
+                      <SelectTrigger id="logo-institution">
+                        <SelectValue placeholder="Select institution" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {institutions.map((institution) => (
+                            <SelectItem key={institution.id} value={institution.id}>
+                              {institution.name}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="replacement-logo">Logo</Label>
+                    <Input id="replacement-logo" name="logo" type="file" accept="image/png,image/jpeg,image/gif,image/webp" required />
+                  </div>
+                  <Button type="submit" disabled={institutions.length === 0}>
+                    <ImageUp data-icon="inline-start" />
+                    Update logo
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>CSV import</CardTitle>
+                <CardDescription>Import institutions, accounts, and month-end records in one file.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <form action={importCsvAction} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="csv-import">CSV file</Label>
+                    <Input id="csv-import" name="csv" type="file" accept=".csv,text/csv" required />
+                  </div>
+                  <Button type="submit">
+                    <FileUp data-icon="inline-start" />
+                    Import CSV
+                  </Button>
+                </form>
+                <div className="rounded-md border">
+                  <div className="flex items-center justify-between border-b p-3">
+                    <p className="text-sm font-medium">Template preview</p>
+                    <Button asChild variant="outline" size="sm">
+                      <a href="/admin/monthly-records-template.csv" download>
+                        <Download data-icon="inline-start" />
+                        Download
+                      </a>
+                    </Button>
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>institution_name</TableHead>
+                        <TableHead>account_name</TableHead>
+                      <TableHead>account_type</TableHead>
+                      <TableHead>month</TableHead>
+                      <TableHead>amount_invested</TableHead>
+                      <TableHead>current_value</TableHead>
+                      <TableHead>currency_code</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell>Wealthsimple</TableCell>
+                        <TableCell>Growth TFSA</TableCell>
+                        <TableCell>TFSA</TableCell>
+                      <TableCell>2026-01</TableCell>
+                      <TableCell>12000</TableCell>
+                      <TableCell>12850</TableCell>
+                      <TableCell>CAD</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>CIBC</TableCell>
+                      <TableCell>Family RESP</TableCell>
+                      <TableCell>RESP</TableCell>
+                      <TableCell>2026-01</TableCell>
+                      <TableCell>5400</TableCell>
+                      <TableCell>5610</TableCell>
+                      <TableCell>CAD</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Institutions</CardTitle>
+                <CardDescription>Logo branding used across account cards and tables.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {institutions.map((institution) => (
+                      <TableRow key={institution.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Avatar>
+                              {institution.logoUrl ? <AvatarImage src={institution.logoUrl} alt={`${institution.name} logo`} /> : null}
+                              <AvatarFallback>{institution.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                            </Avatar>
+                            <span className="font-medium">{institution.name}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DeleteButton kind="institutions" id={institution.id} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {institutions.length === 0 ? <EmptyRow colSpan={2} message="No institutions yet." /> : null}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Accounts</CardTitle>
+                <CardDescription>Accounts belong to one institution.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Institution</TableHead>
+                      <TableHead>Account</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {accounts.map((account) => (
+                      <TableRow key={account.id}>
+                        <TableCell>{institutionName.get(account.institutionId) || "Unknown"}</TableCell>
+                        <TableCell>{account.name}</TableCell>
+                        <TableCell>{account.type}</TableCell>
+                        <TableCell className="text-right">
+                          <DeleteButton kind="accounts" id={account.id} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {accounts.length === 0 ? <EmptyRow colSpan={4} message="No accounts yet." /> : null}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </section>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Monthly records</CardTitle>
+              <CardDescription>Each account can have one record per month.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Month</TableHead>
+                    <TableHead>Institution</TableHead>
+                    <TableHead>Account</TableHead>
+                    <TableHead>Currency</TableHead>
+                    <TableHead className="text-right">Invested</TableHead>
+                    <TableHead className="text-right">Current value</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {records.map((record) => {
+                    const account = accountById.get(record.accountId);
+                    return (
+                      <TableRow key={record.id}>
+                        <TableCell>{monthLabel(record.month)}</TableCell>
+                        <TableCell>{institutionName.get(record.institutionId) || "Unknown"}</TableCell>
+                        <TableCell>{account?.name || "Unknown"}</TableCell>
+                        <TableCell>{record.currencyCode || "USD"}</TableCell>
+                        <TableCell className="text-right">{currency(record.amountInvested, record.currencyCode)}</TableCell>
+                        <TableCell className="text-right">{currency(record.currentValue, record.currencyCode)}</TableCell>
+                        <TableCell className="text-right">
+                          <DeleteButton kind="monthlyRecords" id={record.id} />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {records.length === 0 ? <EmptyRow colSpan={7} message="No monthly records yet." /> : null}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
+
+      {canManageUsers ? (
+        <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <Card>
+            <CardHeader>
+              <CardTitle>User access</CardTitle>
+              <CardDescription>
+                {isAdmin
+                  ? "Create admins, operators, user managers, or viewers."
+                  : "Create viewer accounts only."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form action={createUserAction} className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="new-username">Username</Label>
+                  <Input id="new-username" name="username" autoComplete="username" required />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="new-password">Temporary password</Label>
+                  <Input id="new-password" name="password" type="password" autoComplete="new-password" minLength={12} required />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="new-role">Role</Label>
+                  {isAdmin ? (
+                    <Select name="role" defaultValue="viewer" required>
+                      <SelectTrigger id="new-role">
+                        <SelectValue placeholder="Select role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="viewer">Viewer</SelectItem>
+                          <SelectItem value="user_manager">User manager</SelectItem>
+                          <SelectItem value="operator">Operator</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <>
+                      <input type="hidden" name="role" value="viewer" />
+                      <div className="rounded-md border px-3 py-2 text-sm text-muted-foreground">Viewer</div>
+                    </>
+                  )}
+                </div>
+                <Button type="submit">
+                  <UserPlus data-icon="inline-start" />
+                  Create user
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Users</CardTitle>
+              <CardDescription>Passwords are stored as salted scrypt hashes and never displayed.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Username</TableHead>
+                    <TableHead>Role</TableHead>
+                    {isAdmin ? <TableHead className="text-right">Actions</TableHead> : null}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {users.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell className="font-medium">{user.username}</TableCell>
+                      <TableCell>
+                        <Badge variant={user.role === "admin" ? "default" : "secondary"}>
+                          <Shield data-icon="inline-start" />
+                          {user.role}
+                        </Badge>
+                      </TableCell>
+                      {isAdmin ? (
+                        <TableCell className="text-right">
+                          {user.username === session.username ? null : (
+                            <form action={deleteUserAction} className="flex items-center justify-end gap-3">
+                              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <input type="checkbox" name="confirm" required className="size-4 rounded border-border" />
+                                Confirm
+                              </label>
+                              <input type="hidden" name="id" value={user.id} />
+                              <input type="hidden" name="username" value={user.username} />
+                              <Button type="submit" variant="ghost" size="icon" aria-label="Delete user">
+                                <Trash2 data-icon="inline-start" />
+                              </Button>
+                            </form>
+                          )}
+                        </TableCell>
+                      ) : null}
+                    </TableRow>
+                  ))}
+                  {users.length === 0 ? (
+                    <EmptyRow colSpan={isAdmin ? 3 : 2} message="No users yet. The bootstrap admin is created on first login." />
+                  ) : null}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </section>
+      ) : null}
+    </AppShell>
+  );
+}
+
+function DeleteButton({ kind, id }: { kind: "institutions" | "accounts" | "monthlyRecords"; id: string }) {
+  return (
+    <form action={deleteAction} className="flex items-center justify-end gap-3">
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <input type="checkbox" name="confirm" required className="size-4 rounded border-border" />
+        Confirm
+      </label>
+      <input type="hidden" name="kind" value={kind} />
+      <input type="hidden" name="id" value={id} />
+      <Button type="submit" variant="ghost" size="icon" aria-label="Delete">
+        <Trash2 data-icon="inline-start" />
+      </Button>
+    </form>
+  );
+}
+
+function EmptyRow({ colSpan, message }: { colSpan: number; message: string }) {
+  return (
+    <TableRow>
+      <TableCell colSpan={colSpan} className="h-20 text-center text-muted-foreground">
+        {message}
+      </TableCell>
+    </TableRow>
+  );
+}
