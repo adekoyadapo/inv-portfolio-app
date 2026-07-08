@@ -21,3 +21,4 @@ skills-lock.json
 *.pdf
 *.xlsx
 *.xls
+!/fixtures/sample-statements/**

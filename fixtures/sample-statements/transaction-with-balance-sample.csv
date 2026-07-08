@@ -1,0 +1,4 @@
+Trade Date,Action,Symbol,Quantity,Price,Net Amount,Ending Balance,Account Number,Currency
+2025-01-15,Deposit,,,,2000.00,2000.00,TD-778899,CAD
+2025-01-20,Buy,XYZ,10,45.00,-450.00,1550.00,TD-778899,CAD
+2025-02-18,Buy,XYZ,5,47.00,-235.00,1750.00,TD-778899,CAD

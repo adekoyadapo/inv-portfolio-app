@@ -1,0 +1,5 @@
+Date,Transaction Type,Description,Ticker,Shares,Amount,Account,Currency
+2025-01-05,Deposit,Contribution,,,1000.00,SW-0001,CAD
+2025-01-10,Buy,ACME CORP,ACME,5,-400.00,SW-0001,CAD
+2025-02-12,Buy,ACME CORP,ACME,3,-270.00,SW-0001,CAD
+2025-02-20,Dividend,ACME CORP DIV,ACME,,12.50,SW-0001,CAD

@@ -111,4 +111,63 @@ describe("analyzeInvestmentStatement", () => {
     expect(february?.currentValue).toBe(1000);
     expect(february?.notes.join(" ")).toContain("No balance column or trade activity was present; current value was set to the invested amount");
   });
+
+  it("parses a balance-snapshot sample statement from an alternate provider format", async () => {
+    const csvPath = path.resolve(process.cwd(), "fixtures/sample-statements/balance-snapshot-sample.csv");
+    const bytes = readFileSync(csvPath);
+
+    const batch = await analyzeInvestmentStatement({
+      fileName: "balance-snapshot-sample.csv",
+      mimeType: "text/csv",
+      bytes,
+      config: { provider: "gemini", model: "unused-for-local-spreadsheet-parser", baseUrl: "", apiKey: "" }
+    });
+
+    expect(batch.drafts).toHaveLength(2);
+    const january = batch.drafts.find((draft) => draft.month === "2025-01");
+    expect(january?.institutionName).toBe("Fictional Trust Co");
+    expect(january?.amountInvested).toBe(5000);
+    expect(january?.currentValue).toBe(5120);
+    expect(january?.confidence).toBe(0.9);
+  });
+
+  it("parses a transaction sample using alternate column names, with real gain/loss from repriced trades", async () => {
+    const csvPath = path.resolve(process.cwd(), "fixtures/sample-statements/transaction-activity-sample.csv");
+    const bytes = readFileSync(csvPath);
+
+    const batch = await analyzeInvestmentStatement({
+      fileName: "transaction-activity-sample.csv",
+      mimeType: "text/csv",
+      bytes,
+      config: { provider: "gemini", model: "unused-for-local-spreadsheet-parser", baseUrl: "", apiKey: "" }
+    });
+
+    const timeline = batch.drafts.filter((draft) => draft.accountName === "Summary - SW-0001").sort((left, right) => left.month.localeCompare(right.month));
+    expect(timeline).toHaveLength(2);
+    expect(timeline[0].month).toBe("2025-01");
+    expect(timeline[0].amountInvested).toBe(1000);
+    expect(timeline[0].currentValue).toBe(1000);
+    expect(timeline[1].month).toBe("2025-02");
+    expect(timeline[1].currentValue).toBeCloseTo(1062.5, 2);
+    expect(timeline[1].currentValue).not.toBe(timeline[1].amountInvested);
+  });
+
+  it("parses a transaction sample with an ending-balance column under alternate header names", async () => {
+    const csvPath = path.resolve(process.cwd(), "fixtures/sample-statements/transaction-with-balance-sample.csv");
+    const bytes = readFileSync(csvPath);
+
+    const batch = await analyzeInvestmentStatement({
+      fileName: "transaction-with-balance-sample.csv",
+      mimeType: "text/csv",
+      bytes,
+      config: { provider: "gemini", model: "unused-for-local-spreadsheet-parser", baseUrl: "", apiKey: "" }
+    });
+
+    const timeline = batch.drafts.filter((draft) => draft.accountName === "Summary - TD-778899").sort((left, right) => left.month.localeCompare(right.month));
+    expect(timeline).toHaveLength(2);
+    expect(timeline[0].currentValue).toBe(1550);
+    expect(timeline[0].confidence).toBe(0.78);
+    expect(timeline[1].currentValue).toBe(1750);
+    expect(timeline[1].confidence).toBe(0.78);
+  });
 });

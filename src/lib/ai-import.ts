@@ -637,7 +637,10 @@ async function buildSpreadsheetBatch(input: {
   mimeType: string;
   onStep?: AnalyzeInput["onStep"];
 }): Promise<AiImportBatch> {
-  const workbook = XLSX.read(input.bytes, { type: "buffer" });
+  // raw: true keeps CSV cell text exactly as written; without it, SheetJS auto-detects
+  // date-like strings (e.g. a bare "2025-01" month column) and silently reformats/shifts
+  // them, which then fails our own date/month regexes.
+  const workbook = XLSX.read(input.bytes, { type: "buffer", raw: true });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) {
     return finalizeBatch({
@@ -977,7 +980,20 @@ function normalizeTransactionSpreadsheetRow(row: Record<string, unknown>) {
   const amount = extractSignedAmount(row);
   if (!month || !Number.isFinite(amount)) return null;
 
-  const balanceValue = extractNumericField(row, ["running_balance", "ending_balance", "closing_balance", "balance", "market_value", "current_value", "current value", "value"]);
+  const balanceValue = extractNumericField(row, [
+    "running_balance",
+    "running balance",
+    "ending_balance",
+    "ending balance",
+    "closing_balance",
+    "closing balance",
+    "balance",
+    "market_value",
+    "market value",
+    "current_value",
+    "current value",
+    "value"
+  ]);
   const classification = classifyTransactionActivity(row, amount);
   const isTrade = classification.tradeCost > 0;
   const symbol = isTrade ? normalizeText(String(readAlias(row, ["symbol", "ticker"]) || "")) : "";
@@ -1138,7 +1154,7 @@ function normalizeTransactionDate(value: string) {
 
 function extractSpreadsheetText(bytes: Buffer) {
   try {
-    const workbook = XLSX.read(bytes, { type: "buffer" });
+    const workbook = XLSX.read(bytes, { type: "buffer", raw: true });
     return workbook.SheetNames.map((sheetName) => {
       const sheet = workbook.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_csv(sheet);
