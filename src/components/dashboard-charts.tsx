@@ -18,7 +18,7 @@ import {
 
 import { monthLabel } from "@/lib/utils";
 
-const CHART_COLORS = ["#2563eb", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#64748b", "#ec4899"];
+const CHART_COLORS = ["#14b8a6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#64748b", "#ec4899"];
 
 type TimelinePoint = {
   month: string;
@@ -58,8 +58,8 @@ export function PortfolioTimelineChart({ data }: { data: TimelinePoint[] }) {
               <stop offset="95%" stopColor="#64748b" stopOpacity={0.04} />
             </linearGradient>
             <linearGradient id="portfolio-current-gradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#22c55e" stopOpacity={0.34} />
-              <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
+              <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.34} />
+              <stop offset="95%" stopColor="#14b8a6" stopOpacity={0.05} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -86,7 +86,7 @@ export function PortfolioTimelineChart({ data }: { data: TimelinePoint[] }) {
             type="monotone"
             dataKey="currentValue"
             name="Current value"
-            stroke="#22c55e"
+            stroke="#14b8a6"
             strokeWidth={2}
             fill="url(#portfolio-current-gradient)"
             fillOpacity={1}

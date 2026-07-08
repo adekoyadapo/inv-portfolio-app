@@ -275,7 +275,7 @@ function MetricCard({
       ? "from-emerald-500/16 to-background"
       : tone === "negative"
         ? "from-destructive/14 to-background"
-        : "from-blue-500/14 to-background";
+        : "from-teal-500/14 to-background";
   return (
     <Card className="group overflow-hidden border-border/70 bg-background shadow-[0_22px_55px_-36px_rgba(15,23,42,0.5)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_30px_70px_-40px_rgba(15,23,42,0.6)]">
       <CardContent className={cn("flex min-h-44 flex-col justify-between bg-gradient-to-br p-5", toneClass)}>
@@ -290,7 +290,7 @@ function MetricCard({
                 ? "flex size-11 items-center justify-center rounded-full border bg-emerald-500/10 text-emerald-600 shadow-inner"
                 : tone === "negative"
                   ? "flex size-11 items-center justify-center rounded-full border bg-destructive/10 text-destructive shadow-inner"
-                  : "flex size-11 items-center justify-center rounded-full border bg-blue-500/10 text-blue-600 shadow-inner"
+                  : "flex size-11 items-center justify-center rounded-full border bg-teal-500/10 text-teal-600 shadow-inner"
             }
           >
             {icon}
@@ -303,8 +303,8 @@ function MetricCard({
           </div>
           <MetricSparkline
             data={sparkline}
-            stroke={tone === "positive" ? "#22c55e" : tone === "negative" ? "#ef4444" : "#2563eb"}
-            fill={tone === "positive" ? "#22c55e" : tone === "negative" ? "#ef4444" : "#2563eb"}
+            stroke={tone === "positive" ? "#22c55e" : tone === "negative" ? "#ef4444" : "#14b8a6"}
+            fill={tone === "positive" ? "#22c55e" : tone === "negative" ? "#ef4444" : "#14b8a6"}
           />
         </div>
       </CardContent>
