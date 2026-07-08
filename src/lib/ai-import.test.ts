@@ -53,6 +53,17 @@ describe("analyzeInvestmentStatement", () => {
 
     expect(batch.drafts.some((draft) => draft.summary.includes("set to null"))).toBe(false);
     expect(batch.drafts.every((draft) => draft.currentValue > 0)).toBe(true);
+
+    // Regression coverage for the transaction-only gain/loss fix: an account that buys the
+    // same symbol more than once at different prices should show a real, fluctuating
+    // gain/loss instead of a flat $0 every month (the RESP account rebuys NFLX in Nov 2025
+    // and Jan 2026 at different prices).
+    const respTimeline = batch.drafts
+      .filter((draft) => draft.accountName === "Individual family RESP - 53447846" && draft.currencyCode === "CAD")
+      .sort((left, right) => left.month.localeCompare(right.month));
+    const gains = respTimeline.map((draft) => draft.currentValue - draft.amountInvested);
+    expect(gains.some((gain) => gain !== 0)).toBe(true);
+    expect(new Set(gains.map((gain) => gain.toFixed(2))).size).toBeGreaterThan(1);
   });
 
   it("does not invent a loss when a transaction export has no balance column", async () => {
@@ -98,6 +109,6 @@ describe("analyzeInvestmentStatement", () => {
 
     expect(february?.amountInvested).toBe(1000);
     expect(february?.currentValue).toBe(1000);
-    expect(february?.notes.join(" ")).toContain("No balance column was present; current value was set to the invested amount");
+    expect(february?.notes.join(" ")).toContain("No balance column or trade activity was present; current value was set to the invested amount");
   });
 });

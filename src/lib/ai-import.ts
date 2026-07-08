@@ -761,6 +761,8 @@ function finalizeSummarySpreadsheetBatch(input: {
   });
 }
 
+type TransactionTrade = { symbol: string; quantity: number; price: number; direction: 1 | -1 };
+
 function finalizeTransactionSpreadsheetBatch(input: {
   fileName: string;
   sheetName: string;
@@ -776,6 +778,9 @@ function finalizeTransactionSpreadsheetBatch(input: {
     tradeCost: number;
     balance?: number;
     transactionDate?: string;
+    symbol?: string;
+    quantity?: number;
+    price?: number;
   }>;
   sourceFingerprint: string;
 }): AiImportBatch {
@@ -788,6 +793,8 @@ function finalizeTransactionSpreadsheetBatch(input: {
     monthlyInvested: number;
     monthlyValueActivity: number;
     monthlyTradeCost: number;
+    monthlyCashDelta: number;
+    trades: TransactionTrade[];
     netActivity: number;
     lastBalance?: number;
     latestDate: string;
@@ -814,6 +821,8 @@ function finalizeTransactionSpreadsheetBatch(input: {
         monthlyInvested: 0,
         monthlyValueActivity: 0,
         monthlyTradeCost: 0,
+        monthlyCashDelta: 0,
+        trades: [] as TransactionTrade[],
         netActivity: 0,
         lastBalance: undefined,
         latestDate: "",
@@ -826,6 +835,16 @@ function finalizeTransactionSpreadsheetBatch(input: {
     existing.monthlyInvested += row.investedActivity;
     existing.monthlyValueActivity += row.valueActivity;
     existing.monthlyTradeCost += row.tradeCost;
+    existing.monthlyCashDelta += row.amount;
+
+    if (row.symbol && row.quantity !== undefined && row.price !== undefined) {
+      existing.trades.push({
+        symbol: row.symbol,
+        quantity: row.quantity,
+        price: row.price,
+        direction: row.amount < 0 ? 1 : -1
+      });
+    }
 
     const candidateBalance = typeof row.balance === "number" && Number.isFinite(row.balance) ? row.balance : undefined;
     if (candidateBalance !== undefined) {
@@ -837,7 +856,12 @@ function finalizeTransactionSpreadsheetBatch(input: {
     grouped.set(key, existing);
   }
 
-  const running = new Map<string, { amountInvested: number; currentValue: number }>();
+  const running = new Map<string, {
+    amountInvested: number;
+    cash: number;
+    holdings: Map<string, { quantity: number; lastPrice: number }>;
+    hasTraded: boolean;
+  }>();
   const drafts = Array.from(grouped.values())
     .sort((left, right) => {
       const leftKey = `${left.institutionName}|${left.accountName}|${left.accountType}|${left.currencyCode}|${left.month}`;
@@ -852,14 +876,44 @@ function finalizeTransactionSpreadsheetBatch(input: {
         month: "",
         currencyCode: row.currencyCode
       });
-      const previous = running.get(runningKey) || { amountInvested: 0, currentValue: 0 };
+      const previous = running.get(runningKey) || {
+        amountInvested: 0,
+        cash: 0,
+        holdings: new Map<string, { quantity: number; lastPrice: number }>(),
+        hasTraded: false
+      };
       const investedActivity = row.monthlyInvested > 0 ? row.monthlyInvested : row.monthlyTradeCost;
       const amountInvested = Math.max(previous.amountInvested + investedActivity, 0);
-      const currentValue =
-        row.lastBalance !== undefined
-          ? row.lastBalance
-          : amountInvested;
-      running.set(runningKey, { amountInvested, currentValue });
+      const cash = previous.cash + row.monthlyCashDelta;
+      const holdings = previous.holdings;
+      for (const trade of row.trades) {
+        const position = holdings.get(trade.symbol) || { quantity: 0, lastPrice: 0 };
+        position.quantity += trade.direction * trade.quantity;
+        position.lastPrice = trade.price;
+        holdings.set(trade.symbol, position);
+      }
+      const hasTraded = previous.hasTraded || row.trades.length > 0;
+
+      let currentValue: number;
+      let confidence: number;
+      let valueNote: string;
+      if (row.lastBalance !== undefined) {
+        currentValue = row.lastBalance;
+        confidence = 0.78;
+        valueNote = "The export included a balance column; the latest available value was used for the month summary.";
+      } else if (hasTraded) {
+        const holdingsValue = Array.from(holdings.values()).reduce((sum, position) => sum + position.quantity * position.lastPrice, 0);
+        currentValue = cash + holdingsValue;
+        confidence = 0.74;
+        valueNote =
+          "No balance column was present; current value was estimated from transaction history (cash flows plus each holding marked at its most recently observed trade price). Positions acquired before this statement's date range aren't reflected.";
+      } else {
+        currentValue = amountInvested;
+        confidence = 0.68;
+        valueNote = "No balance column or trade activity was present; current value was set to the invested amount to avoid inventing a synthetic gain or loss.";
+      }
+
+      running.set(runningKey, { amountInvested, cash, holdings, hasTraded });
 
       return {
         sourceName: input.fileName,
@@ -868,9 +922,7 @@ function finalizeTransactionSpreadsheetBatch(input: {
         notes: [
           ...row.notes,
           `Grouped ${row.rowCount} transaction${row.rowCount === 1 ? "" : "s"} for this account and month.`,
-          row.lastBalance !== undefined
-            ? "The export included a balance column; the latest available value was used for the month summary."
-            : "No balance column was present; current value was set to the invested amount to avoid inventing a synthetic gain or loss."
+          valueNote
         ],
         sourceFingerprint: input.sourceFingerprint,
         institutionName: row.institutionName,
@@ -880,7 +932,7 @@ function finalizeTransactionSpreadsheetBatch(input: {
         currencyCode: row.currencyCode,
         amountInvested,
         currentValue,
-        confidence: row.lastBalance !== undefined ? 0.78 : 0.68,
+        confidence,
         selected: true
       };
     })
@@ -927,6 +979,16 @@ function normalizeTransactionSpreadsheetRow(row: Record<string, unknown>) {
 
   const balanceValue = extractNumericField(row, ["running_balance", "ending_balance", "closing_balance", "balance", "market_value", "current_value", "current value", "value"]);
   const classification = classifyTransactionActivity(row, amount);
+  const isTrade = classification.tradeCost > 0;
+  const symbol = isTrade ? normalizeText(String(readAlias(row, ["symbol", "ticker"]) || "")) : "";
+  const quantityRaw = extractNumericField(row, ["quantity", "shares"]);
+  const quantity = isTrade && symbol && Number.isFinite(quantityRaw) && quantityRaw !== 0 ? Math.abs(quantityRaw) : undefined;
+  // Derived from the settlement-currency net amount rather than the sheet's raw price column,
+  // since some exports report price in the security's trading currency (e.g. USD) while the
+  // net amount is FX-converted to the account's settlement currency (e.g. CAD) — using the raw
+  // price would understate/overstate holdings value by the FX rate.
+  const price = isTrade && quantity !== undefined ? Math.abs(amount) / quantity : undefined;
+
   return {
     institutionName,
     accountName: buildTransactionAccountName(accountNumber, accountType, row),
@@ -938,7 +1000,10 @@ function normalizeTransactionSpreadsheetRow(row: Record<string, unknown>) {
     valueActivity: classification.valueActivity,
     tradeCost: classification.tradeCost,
     balance: balanceValue,
-    transactionDate: normalizeTransactionDate(transactionDateRaw)
+    transactionDate: normalizeTransactionDate(transactionDateRaw),
+    symbol: symbol || undefined,
+    quantity,
+    price
   };
 }
 
