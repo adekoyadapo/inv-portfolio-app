@@ -224,7 +224,7 @@ export function AppShell({
             <ThemeToggle />
           </div>
         </header>
-        <main className="page-transition mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 md:p-8">{children}</main>
+        <main className="page-transition mx-auto flex w-full max-w-[1680px] flex-col gap-6 p-4 md:p-8">{children}</main>
         <nav className="fixed inset-x-3 bottom-3 z-20 flex items-center justify-around rounded-full border bg-background/95 p-2 shadow-[0_18px_44px_-24px_rgba(15,23,42,0.55)] backdrop-blur md:hidden">
           {navItems.map((item) => {
             const Icon = item.icon;
