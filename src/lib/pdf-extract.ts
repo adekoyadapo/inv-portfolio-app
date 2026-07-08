@@ -1,7 +1,12 @@
 import { PDFParse } from "pdf-parse";
 import path from "node:path";
 
-export async function extractPdfText(bytes: Buffer) {
+export type PdfExtraction = {
+  text: string;
+  pageCount: number;
+};
+
+export async function extractPdfText(bytes: Buffer): Promise<PdfExtraction> {
   try {
     const workerSrc = path.join(process.cwd(), "node_modules", "pdfjs-dist", "legacy", "build", "pdf.worker.mjs");
     PDFParse.setWorker(workerSrc);
@@ -9,11 +14,15 @@ export async function extractPdfText(bytes: Buffer) {
 
     try {
       const result = await parser.getText();
-      return result.text || "";
+      const pages = result.pages || [];
+      const text = pages.length > 0
+        ? pages.map((page) => `--- Page ${page.num} ---\n${page.text}`).join("\n\n")
+        : result.text || "";
+      return { text, pageCount: pages.length || result.total || 0 };
     } finally {
       await parser.destroy();
     }
   } catch {
-    return "";
+    return { text: "", pageCount: 0 };
   }
 }

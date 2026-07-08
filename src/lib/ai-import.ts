@@ -70,7 +70,18 @@ export async function analyzeInvestmentStatement(input: AnalyzeInput) {
         : "Preparing content for analysis."
   );
 
-  const extractedText = sourceType === "pdf" ? await extractPdfText(input.bytes) : sourceType === "spreadsheet" ? extractSpreadsheetText(input.bytes) : input.bytes.toString("utf8");
+  let extractedText = "";
+  let pdfPageCount = 0;
+  if (sourceType === "pdf") {
+    const extraction = await extractPdfText(input.bytes);
+    extractedText = extraction.text;
+    pdfPageCount = extraction.pageCount;
+  } else if (sourceType === "spreadsheet") {
+    extractedText = extractSpreadsheetText(input.bytes);
+  } else {
+    extractedText = input.bytes.toString("utf8");
+  }
+
   const batch =
     sourceType === "spreadsheet"
       ? await buildSpreadsheetBatch({
@@ -89,7 +100,8 @@ export async function analyzeInvestmentStatement(input: AnalyzeInput) {
           config: input.config,
           bytes: input.bytes,
           mimeType: input.mimeType,
-          onStep: input.onStep
+          onStep: input.onStep,
+          pdfPageCount
         });
 
   await stage(input.onStep, "normalize", "Normalize payload", `Shaping ${batch.drafts.length} draft${batch.drafts.length === 1 ? "" : "s"} into review rows.`);
@@ -226,6 +238,7 @@ async function buildModelBatch(input: {
   bytes: Buffer;
   mimeType: string;
   onStep?: AnalyzeInput["onStep"];
+  pdfPageCount?: number;
 }): Promise<AiImportBatch> {
   const prompt = buildPrompt({
     fileName: input.fileName,
@@ -261,7 +274,28 @@ async function buildModelBatch(input: {
     throw error;
   });
 
-  return normalizeBatch(raw, input.fileName, input.sourceType, input.extractedText, input.sourceFingerprint);
+  const batch = normalizeBatch(raw, input.fileName, input.sourceType, input.extractedText, input.sourceFingerprint);
+  return appendSparseExtractionNote(batch, input.sourceType, input.extractedText, input.pdfPageCount);
+}
+
+const MIN_CHARS_PER_PDF_PAGE = 150;
+
+function appendSparseExtractionNote(
+  batch: AiImportBatch,
+  sourceType: AiImportBatch["sourceType"],
+  extractedText: string,
+  pageCount?: number
+): AiImportBatch {
+  if (sourceType !== "pdf" || !pageCount || pageCount <= 0) return batch;
+  const charsPerPage = extractedText.length / pageCount;
+  if (charsPerPage >= MIN_CHARS_PER_PDF_PAGE) return batch;
+  return {
+    ...batch,
+    notes: [
+      ...batch.notes,
+      `This ${pageCount}-page PDF extracted very little text (${Math.round(charsPerPage)} characters/page on average). It may be a scanned or image-based document; some account sections could be missing. Compare against the source statement before accepting.`
+    ]
+  };
 }
 
 function buildPrompt(input: { fileName: string; sourceType: AiImportBatch["sourceType"]; extractedText: string; sourceFingerprint: string }) {

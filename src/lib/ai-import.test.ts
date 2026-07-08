@@ -8,14 +8,16 @@ import { analyzeInvestmentStatement } from "@/lib/ai-import";
 import { extractPdfText } from "@/lib/pdf-extract";
 
 describe("extractPdfText", () => {
-  it("extracts text from a real statement PDF fixture", async () => {
+  it("extracts page-delimited text from a real statement PDF fixture", async () => {
     const pdfPath = path.resolve(process.cwd(), "onlineStatement.pdf");
     const bytes = readFileSync(pdfPath);
 
-    const text = await extractPdfText(bytes);
+    const { text, pageCount } = await extractPdfText(bytes);
 
     expect(text.trim().length).toBeGreaterThan(0);
     expect(text).toContain("CIBC Securities Inc.");
+    expect(text).toContain("--- Page 1 ---");
+    expect(pageCount).toBeGreaterThan(0);
   });
 });
 
