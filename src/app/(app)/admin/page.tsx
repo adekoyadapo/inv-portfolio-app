@@ -171,13 +171,13 @@ export default async function AdminPage({
     const accountCount = accountCountByInstitution.get(institutionId) || 0;
     const recordCount = recordCountByInstitution.get(institutionId) || 0;
     if (accountCount === 0 && recordCount === 0) return undefined;
-    return `also deletes ${accountCount} account${accountCount === 1 ? "" : "s"}, ${recordCount} record${recordCount === 1 ? "" : "s"}`;
+    return `also delete ${accountCount} account${accountCount === 1 ? "" : "s"} and ${recordCount} record${recordCount === 1 ? "" : "s"}`;
   }
 
   function accountDeleteImpact(accountId: string) {
     const recordCount = recordCountByAccount.get(accountId) || 0;
     if (recordCount === 0) return undefined;
-    return `also deletes ${recordCount} record${recordCount === 1 ? "" : "s"}`;
+    return `also delete ${recordCount} record${recordCount === 1 ? "" : "s"}`;
   }
   const accountTypes = Array.from(new Set([...baseAccountTypes, ...accounts.map((account) => account.type).filter(Boolean)])).sort((left, right) =>
     left.localeCompare(right)

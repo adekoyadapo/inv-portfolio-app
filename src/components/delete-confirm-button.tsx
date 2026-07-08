@@ -6,6 +6,14 @@ import { Loader2, Trash2 } from "lucide-react";
 
 import { deleteAction, deleteUserAction } from "@/app/actions";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 
 type DeleteState = {
   status: "idle" | "deleted";
@@ -21,7 +29,11 @@ export function DeleteRecordButton({
   id: string;
   impactMessage?: string;
 }) {
-  return <DeleteActionControl kind={kind} id={id} impactMessage={impactMessage} />;
+  if (kind === "institutions" || kind === "accounts") {
+    return <DeleteWithDialog kind={kind} id={id} impactMessage={impactMessage} />;
+  }
+
+  return <DeleteInlineConfirm kind={kind} id={id} />;
 }
 
 export function DeleteUserButton({
@@ -35,22 +47,11 @@ export function DeleteUserButton({
 }) {
   if (username === currentUsername) return null;
 
-  return <DeleteActionControl kind="users" id={id} username={username} />;
+  return <DeleteInlineConfirm kind="users" id={id} username={username} />;
 }
 
-function DeleteActionControl({
-  kind,
-  id,
-  username,
-  impactMessage
-}: {
-  kind: "institutions" | "accounts" | "monthlyRecords" | "users";
-  id: string;
-  username?: string;
-  impactMessage?: string;
-}) {
+function useDeleteFormAction(kind: "institutions" | "accounts" | "monthlyRecords" | "users") {
   const router = useRouter();
-  const [confirmed, setConfirmed] = useState(false);
   const refreshedRef = useRef(false);
   const [state, formAction, pending] = useActionState<DeleteState, FormData>(
     async (_previousState, formData) => {
@@ -69,12 +70,73 @@ function DeleteActionControl({
     }
   }, [router, state.status]);
 
+  return { state, formAction, pending };
+}
+
+function DeleteWithDialog({
+  kind,
+  id,
+  impactMessage
+}: {
+  kind: "institutions" | "accounts";
+  id: string;
+  impactMessage?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const { state, formAction, pending } = useDeleteFormAction(kind);
+  const dialogOpen = open && state.status !== "deleted";
+
+  const label = kind === "institutions" ? "institution" : "account";
+
+  return (
+    <>
+      <Button type="button" variant="ghost" size="icon" aria-label="Delete" onClick={() => setOpen(true)}>
+        <Trash2 data-icon="inline-start" />
+      </Button>
+      <Dialog open={dialogOpen} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this {label}?</DialogTitle>
+            <DialogDescription>
+              {impactMessage ? `This will ${impactMessage}. This action cannot be undone.` : "This action cannot be undone."}
+            </DialogDescription>
+          </DialogHeader>
+          <form action={formAction} className="flex flex-col gap-3">
+            <input type="hidden" name="kind" value={kind} />
+            <input type="hidden" name="id" value={id} />
+            <input type="hidden" name="confirm" value="on" />
+            {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="destructive" disabled={pending}>
+                {pending ? <Loader2 className="size-4 animate-spin" data-icon="inline-start" /> : <Trash2 data-icon="inline-start" />}
+                Delete
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function DeleteInlineConfirm({
+  kind,
+  id,
+  username
+}: {
+  kind: "monthlyRecords" | "users";
+  id: string;
+  username?: string;
+}) {
+  const [confirmed, setConfirmed] = useState(false);
+  const { state, formAction, pending } = useDeleteFormAction(kind);
+
   return (
     <form action={formAction} className="flex items-center justify-end gap-3">
-      <label
-        className="flex items-center gap-2 text-xs text-muted-foreground"
-        title={impactMessage}
-      >
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
         <input
           type="checkbox"
           name="confirm"
@@ -83,7 +145,6 @@ function DeleteActionControl({
           className="size-4 rounded border-border"
         />
         Confirm
-        {impactMessage ? <span className="text-destructive">({impactMessage})</span> : null}
       </label>
       <input type="hidden" name="kind" value={kind === "users" ? "" : kind} />
       <input type="hidden" name="id" value={id} />
