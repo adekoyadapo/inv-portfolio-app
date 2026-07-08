@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type ImportSummary = {
   institutions: number;
@@ -29,6 +30,7 @@ type ImportSummary = {
 export function DataMigrationCard() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [exportFormat, setExportFormat] = useState<"json" | "xlsx">("json");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -82,16 +84,29 @@ export function DataMigrationCard() {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">Export</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-medium">Export</p>
+            <Select value={exportFormat} onValueChange={(value) => setExportFormat(value as "json" | "xlsx")}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="json">JSON</SelectItem>
+                  <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button asChild variant="outline">
-              <a href="/api/admin/export?scope=portfolio">
+              <a href={`/api/admin/export?scope=portfolio&format=${exportFormat}`}>
                 <Download data-icon="inline-start" />
                 Export portfolio data
               </a>
             </Button>
             <Button asChild variant="outline">
-              <a href="/api/admin/export?scope=full">
+              <a href={`/api/admin/export?scope=full&format=${exportFormat}`}>
                 <Download data-icon="inline-start" />
                 Export everything
               </a>
@@ -100,7 +115,8 @@ export function DataMigrationCard() {
           <p className="text-xs text-muted-foreground">
             Portfolio data covers institutions, accounts, and monthly records. Everything also includes users (with
             password hashes) and feature settings. Institution logos live in object storage and aren&apos;t part of
-            the dump.
+            the dump. Excel exports one sheet per table and are for viewing/analysis &mdash; only JSON can be
+            imported back in below.
           </p>
         </div>
 
