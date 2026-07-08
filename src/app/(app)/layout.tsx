@@ -11,7 +11,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ]);
 
   return (
-    <AppShell session={session} initialSidebarCollapsed={initialSidebarCollapsed} aiImportEnabled={aiImportSettings.enabled}>
+    <AppShell
+      session={session}
+      initialSidebarCollapsed={initialSidebarCollapsed}
+      aiImportEnabled={aiImportSettings.enabled}
+      demoEnabled={aiImportSettings.demoEnabled}
+    >
       {children}
     </AppShell>
   );

@@ -48,18 +48,21 @@ export function AppShell({
   children,
   session,
   initialSidebarCollapsed = false,
-  aiImportEnabled = false
+  aiImportEnabled = false,
+  demoEnabled = false
 }: {
   children: React.ReactNode;
   session?: { username: string; role: UserRole } | null;
   initialSidebarCollapsed?: boolean;
   aiImportEnabled?: boolean;
+  demoEnabled?: boolean;
 }) {
   const isAdmin = session?.role === "admin";
   const isOperator = session?.role === "operator";
   const isUserManager = session?.role === "user_manager";
   const canOpenAdmin = isAdmin || isOperator || isUserManager;
   const canOpenAiImport = aiImportEnabled && (isAdmin || isOperator);
+  const canSeeDashboard = isAdmin || !demoEnabled;
   const pathname = usePathname();
   const isDemoRoute = pathname?.startsWith("/demo") ?? false;
   const [isNavigating, setIsNavigating] = useState(false);
@@ -86,10 +89,13 @@ export function AppShell({
     if (href !== pathname) setIsNavigating(true);
   }
 
+  const homeHref = isDemoRoute || !canSeeDashboard ? "/demo" : "/dashboard";
+
   const navItems = isDemoRoute
     ? [{ href: "/demo", label: "Demo", icon: Sparkles }]
     : [
-        { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
+        ...(canSeeDashboard ? [{ href: "/dashboard", label: "Dashboard", icon: BarChart3 }] : []),
+        ...(demoEnabled ? [{ href: "/demo", label: "Demo", icon: Sparkles }] : []),
         ...(canOpenAdmin ? [{ href: "/admin", label: "Admin", icon: Building2 }] : []),
         ...(canOpenAiImport ? [{ href: "/admin/ai-import", label: "Smart Import", icon: FileUp }] : [])
       ];
@@ -204,9 +210,9 @@ export function AppShell({
       <div className={cn("transition-[padding] duration-200", collapsed ? "md:pl-20" : "md:pl-64")}>
         <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b bg-background/95 px-4 backdrop-blur md:hidden">
           <Link
-            href={isDemoRoute ? "/demo" : "/dashboard"}
+            href={homeHref}
             className="text-sm font-semibold"
-            onClick={() => markNavigation(isDemoRoute ? "/demo" : "/dashboard")}
+            onClick={() => markNavigation(homeHref)}
           >
             Investment Admin
           </Link>
