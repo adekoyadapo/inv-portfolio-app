@@ -4,10 +4,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { requireAdminOrOperator } from "@/lib/auth";
 import { getAiImportSettings } from "@/lib/elasticsearch";
 import { getAiRuntimeConfig } from "@/lib/ai-config";
+import { withMinDuration } from "@/lib/timing";
 import { AiImportWorkbench } from "@/components/ai-import-workbench";
 
 export default async function AiImportPage() {
-  const [, settings] = await Promise.all([requireAdminOrOperator(), getAiImportSettings()]);
+  const settings = await withMinDuration(async () => {
+    const [, settings] = await Promise.all([requireAdminOrOperator(), getAiImportSettings()]);
+    return settings;
+  }, 2000);
   const runtimeConfig = getAiRuntimeConfig();
 
   return (

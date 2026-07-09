@@ -4,14 +4,17 @@ import { DashboardView } from "@/components/dashboard-view";
 import { Card, CardContent } from "@/components/ui/card";
 import { getDemoDashboardData } from "@/lib/demo-data";
 import { getAiImportSettings } from "@/lib/elasticsearch";
+import { withMinDuration } from "@/lib/timing";
 
 export default async function DemoPage() {
-  const aiImportSettings = await getAiImportSettings();
-  if (!aiImportSettings.demoEnabled) {
-    redirect("/dashboard");
-  }
+  const data = await withMinDuration(async () => {
+    const aiImportSettings = await getAiImportSettings();
+    if (!aiImportSettings.demoEnabled) {
+      redirect("/dashboard");
+    }
 
-  const data = getDemoDashboardData();
+    return getDemoDashboardData();
+  }, 2000);
 
   return (
     <>

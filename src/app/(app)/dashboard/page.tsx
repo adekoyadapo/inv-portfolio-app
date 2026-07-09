@@ -3,18 +3,23 @@ import { Card, CardContent } from "@/components/ui/card";
 import { getSession } from "@/lib/auth";
 import { buildDashboardData } from "@/lib/dashboard";
 import { listAccounts, listInstitutions, listMonthlyRecords } from "@/lib/elasticsearch";
+import { withMinDuration } from "@/lib/timing";
 
 export default async function DashboardPage() {
-  const session = await getSession();
+  const { session, data, loadError } = await withMinDuration(async () => {
+    const session = await getSession();
 
-  let data;
-  let loadError = "";
-  try {
-    data = buildDashboardData(await listInstitutions(), await listAccounts(), await listMonthlyRecords());
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : "Unable to load dashboard data.";
-    data = buildDashboardData([], [], []);
-  }
+    let data;
+    let loadError = "";
+    try {
+      data = buildDashboardData(await listInstitutions(), await listAccounts(), await listMonthlyRecords());
+    } catch (error) {
+      loadError = error instanceof Error ? error.message : "Unable to load dashboard data.";
+      data = buildDashboardData([], [], []);
+    }
+
+    return { session, data, loadError };
+  }, 2000);
 
   return (
     <>
