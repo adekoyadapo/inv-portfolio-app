@@ -12,6 +12,7 @@ type AnalyzeInput = {
   mimeType: string;
   bytes: Buffer;
   config: AiRuntimeCredentials;
+  fileIndex?: number;
   onStep?: (step: AiImportStep) => void;
   onFile?: (file: AiImportFileProgress) => void;
 };
@@ -57,10 +58,12 @@ const analysisSystemPrompt = [
 export async function analyzeInvestmentStatement(input: AnalyzeInput) {
   const sourceType = detectSourceType(input.mimeType, input.fileName);
   const sourceFingerprint = fingerprintBytes(input.bytes);
+  const fileId = fileProgressId(input.fileName, input.fileIndex ?? 0);
 
-  await stage(input.onStep, "validate", "Validate upload", "File received and format checked.");
+  await stage(input.onStep, fileId, "validate", "Validate upload", "File received and format checked.");
   await stage(
     input.onStep,
+    fileId,
     "read",
     sourceType === "spreadsheet" ? "Read spreadsheet" : sourceType === "pdf" ? "Read PDF" : "Read source",
     sourceType === "spreadsheet"
@@ -90,7 +93,8 @@ export async function analyzeInvestmentStatement(input: AnalyzeInput) {
           sourceFingerprint,
           config: input.config,
           mimeType: input.mimeType,
-          onStep: input.onStep
+          onStep: input.onStep,
+          fileId
         })
       : await buildModelBatch({
           fileName: input.fileName,
@@ -101,12 +105,20 @@ export async function analyzeInvestmentStatement(input: AnalyzeInput) {
           bytes: input.bytes,
           mimeType: input.mimeType,
           onStep: input.onStep,
-          pdfPageCount
+          pdfPageCount,
+          fileId
         });
 
-  await stage(input.onStep, "normalize", "Normalize payload", `Shaping ${batch.drafts.length} draft${batch.drafts.length === 1 ? "" : "s"} into review rows.`);
+  await stage(
+    input.onStep,
+    fileId,
+    "normalize",
+    "Normalize payload",
+    `Shaping ${batch.drafts.length} draft${batch.drafts.length === 1 ? "" : "s"} into review rows.`
+  );
   emitStep(
     input.onStep,
+    fileId,
     "review",
     "Ready for review",
     batch.drafts.length > 0
@@ -147,8 +159,9 @@ export async function analyzeInvestmentStatements(inputs: AnalyzeInput[]) {
 
   const batches: AiImportBatch[] = [];
   for (const [index, input] of inputs.entries()) {
+    const fileId = fileProgressId(input.fileName, input.fileIndex ?? index);
     input.onFile?.({
-      id: fileProgressId(input.fileName, index),
+      id: fileId,
       fileName: input.fileName,
       bytes: input.bytes.length,
       status: "running",
@@ -157,6 +170,7 @@ export async function analyzeInvestmentStatements(inputs: AnalyzeInput[]) {
     });
     await stage(
       input.onStep,
+      fileId,
       "read",
       "Read source batch",
       `Analyzing ${input.fileName} (${index + 1} of ${inputs.length}).`
@@ -164,7 +178,7 @@ export async function analyzeInvestmentStatements(inputs: AnalyzeInput[]) {
     const batch = await analyzeInvestmentStatement(input);
     batches.push(batch);
     input.onFile?.({
-      id: fileProgressId(input.fileName, index),
+      id: fileId,
       fileName: input.fileName,
       bytes: input.bytes.length,
       status: "complete",
@@ -201,6 +215,7 @@ export async function analyzeInvestmentStatements(inputs: AnalyzeInput[]) {
 
   emitStep(
     inputs[0].onStep,
+    fileProgressId(inputs[0].fileName, inputs[0].fileIndex ?? 0),
     "review",
     "Ready for review",
     `${batch.drafts.length} summary row${batch.drafts.length === 1 ? "" : "s"} ready across ${inputs.length} files.`,
@@ -239,6 +254,7 @@ async function buildModelBatch(input: {
   mimeType: string;
   onStep?: AnalyzeInput["onStep"];
   pdfPageCount?: number;
+  fileId: string;
 }): Promise<AiImportBatch> {
   const prompt = buildPrompt({
     fileName: input.fileName,
@@ -247,7 +263,7 @@ async function buildModelBatch(input: {
     sourceFingerprint: input.sourceFingerprint
   });
 
-  await stage(input.onStep, "infer", "LLM extraction", `Using ${input.config.provider} / ${input.config.model}.`);
+  await stage(input.onStep, input.fileId, "infer", "LLM extraction", `Using ${input.config.provider} / ${input.config.model}.`);
 
   const raw = await requestProviderDraft({
     provider: input.config.provider,
@@ -261,7 +277,7 @@ async function buildModelBatch(input: {
     sourceFingerprint: input.sourceFingerprint
   }).catch(async (error) => {
     if (input.sourceType === "pdf" && input.extractedText.trim().length > 0) {
-      await stage(input.onStep, "fallback", "Local fallback", "Provider call failed, using text extraction fallback.");
+      await stage(input.onStep, input.fileId, "fallback", "Local fallback", "Provider call failed, using text extraction fallback.");
       return buildFallbackBatch({
         fileName: input.fileName,
         sourceType: input.sourceType,
@@ -670,6 +686,7 @@ async function buildSpreadsheetBatch(input: {
   config: AiRuntimeCredentials;
   mimeType: string;
   onStep?: AnalyzeInput["onStep"];
+  fileId: string;
 }): Promise<AiImportBatch> {
   // raw: true keeps CSV cell text exactly as written; without it, SheetJS auto-detects
   // date-like strings (e.g. a bare "2025-01" month column) and silently reformats/shifts
@@ -695,6 +712,7 @@ async function buildSpreadsheetBatch(input: {
   if (summaryRows.length > 0) {
     emitStep(
       input.onStep,
+      input.fileId,
       "infer",
       "Structured spreadsheet parser",
       `Detected ${summaryRows.length} CSV-style summary row${summaryRows.length === 1 ? "" : "s"}; no LLM review was needed.`,
@@ -715,6 +733,7 @@ async function buildSpreadsheetBatch(input: {
   if (transactionRows.length > 0) {
     emitStep(
       input.onStep,
+      input.fileId,
       "infer",
       "Structured spreadsheet parser",
       `Detected ${transactionRows.length} transaction row${transactionRows.length === 1 ? "" : "s"}; no LLM review was needed.`,
@@ -736,7 +755,8 @@ async function buildSpreadsheetBatch(input: {
     config: input.config,
     bytes: input.bytes,
     mimeType: input.mimeType,
-    onStep: input.onStep
+    onStep: input.onStep,
+    fileId: input.fileId
   });
 }
 
@@ -1413,18 +1433,19 @@ function sumAllMatches(text: string, pattern: RegExp) {
 
 function emitStep(
   onStep: AnalyzeInput["onStep"] | undefined,
+  fileId: string,
   id: string,
   label: string,
   detail: string,
   status: AiImportStep["status"]
 ) {
-  onStep?.({ id, label, detail, status });
+  onStep?.({ id, fileId, label, detail, status });
 }
 
-async function stage(onStep: AnalyzeInput["onStep"] | undefined, id: string, label: string, detail: string) {
-  emitStep(onStep, id, label, detail, "running");
+async function stage(onStep: AnalyzeInput["onStep"] | undefined, fileId: string, id: string, label: string, detail: string) {
+  emitStep(onStep, fileId, id, label, detail, "running");
   await delay(160);
-  emitStep(onStep, id, label, detail, "complete");
+  emitStep(onStep, fileId, id, label, detail, "complete");
   await delay(80);
 }
 

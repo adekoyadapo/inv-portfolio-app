@@ -94,6 +94,7 @@ export type AiImportBatch = {
 
 export type AiImportStep = {
   id: string;
+  fileId?: string;
   label: string;
   detail: string;
   status: "not_started" | "pending" | "running" | "complete" | "error";

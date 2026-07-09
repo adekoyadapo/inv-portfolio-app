@@ -89,6 +89,11 @@ export async function importMonthlyRecordsCsv(file: File) {
   return { imported };
 }
 
+export function stringifyCsv(headers: readonly string[], rows: string[][]): string {
+  const escape = (cell: string) => (/[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell);
+  return [headers, ...rows].map((row) => row.map(escape).join(",")).join("\n") + "\n";
+}
+
 function parseCsv(text: string) {
   const rows: string[][] = [];
   let row: string[] = [];

@@ -62,8 +62,9 @@ export async function POST(request: NextRequest) {
           model: runtimeConfig.model
         });
         const draft = await analyzeInvestmentStatements(
-          uploads.map((upload) => ({
+          uploads.map((upload, index) => ({
             ...upload,
+            fileIndex: index,
             onStep(step) {
               send("step", step);
             },

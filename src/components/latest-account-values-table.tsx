@@ -8,6 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { computeStaleAccountIds } from "@/lib/dashboard";
 import type { DashboardData } from "@/lib/types";
 import { currency, monthLabel } from "@/lib/utils";
@@ -71,13 +72,18 @@ export function LatestAccountValuesTable({
                   <span className="flex items-center gap-2">
                     {snapshot.latest ? monthLabel(snapshot.latest.month) : "No record"}
                     {staleAccountIds.has(snapshot.account.id) ? (
-                      <Badge
-                        variant="outline"
-                        className="border-amber-500/40 text-amber-600 dark:text-amber-400"
-                        title="Other accounts at this institution have newer records"
-                      >
-                        Stale
-                      </Badge>
+                      <TooltipProvider delayDuration={150}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span>
+                              <Badge variant="outline" className="border-amber-500/40 text-amber-600 dark:text-amber-400">
+                                Stale
+                              </Badge>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>Other accounts at this institution have newer records</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     ) : null}
                   </span>
                   <span>{snapshot.latest?.currencyCode || "USD"}</span>
@@ -145,13 +151,18 @@ export function LatestAccountValuesTable({
                     <span className="flex items-center gap-2">
                       {snapshot.latest ? monthLabel(snapshot.latest.month) : "No record"}
                       {staleAccountIds.has(snapshot.account.id) ? (
-                        <Badge
-                          variant="outline"
-                          className="border-amber-500/40 text-amber-600 dark:text-amber-400"
-                          title="Other accounts at this institution have newer records"
-                        >
-                          Stale
-                        </Badge>
+                        <TooltipProvider delayDuration={150}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span>
+                                <Badge variant="outline" className="border-amber-500/40 text-amber-600 dark:text-amber-400">
+                                  Stale
+                                </Badge>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Other accounts at this institution have newer records</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       ) : null}
                     </span>
                   </TableCell>

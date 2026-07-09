@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { MonthlyReturnHeatmap } from "@/components/monthly-return-heatmap";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { TopMovers } from "@/components/top-movers";
 import { computeMonthlyReturnHeatmap, computeStaleAccountIds, computeTopMovers } from "@/lib/dashboard";
 import type { DrilldownData } from "@/lib/types";
@@ -160,13 +161,18 @@ export function DrilldownView({
                         {account.name}
                       </Link>
                       {staleAccountIds.has(account.id) ? (
-                        <Badge
-                          variant="outline"
-                          className="border-amber-500/40 text-amber-600 dark:text-amber-400"
-                          title="Other accounts at this institution have newer records"
-                        >
-                          Stale
-                        </Badge>
+                        <TooltipProvider delayDuration={150}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span>
+                                <Badge variant="outline" className="border-amber-500/40 text-amber-600 dark:text-amber-400">
+                                  Stale
+                                </Badge>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>Other accounts at this institution have newer records</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       ) : null}
                     </span>
                   </TableCell>

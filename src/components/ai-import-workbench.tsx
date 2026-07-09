@@ -41,7 +41,7 @@ export function AiImportWorkbench({
   runtimeConfig: AiRuntimeConfig;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [steps, setSteps] = useState(initialSteps);
+  const [stepsByFile, setStepsByFile] = useState<Record<string, AiImportStep[]>>({});
   const [batch, setBatch] = useState<AiImportBatch | null>(null);
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
@@ -49,15 +49,14 @@ export function AiImportWorkbench({
   const [acceptMessage, setAcceptMessage] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [fileProgresses, setFileProgresses] = useState<AiImportFileProgress[]>([]);
+  const [lastCompletedFileId, setLastCompletedFileId] = useState<string | null>(null);
+  const [forceExpandedFileIds, setForceExpandedFileIds] = useState<Set<string>>(new Set());
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 
-  const activeCount = useMemo(() => steps.filter((step) => step.status === "complete").length, [steps]);
   const overallProgress = useMemo(() => {
-    if (fileProgresses.length > 0) {
-      return Math.round(fileProgresses.reduce((sum, file) => sum + file.progress, 0) / fileProgresses.length);
-    }
-    return Math.round((activeCount / steps.length) * 100);
-  }, [activeCount, fileProgresses, steps.length]);
+    if (fileProgresses.length === 0) return 0;
+    return Math.round(fileProgresses.reduce((sum, file) => sum + file.progress, 0) / fileProgresses.length);
+  }, [fileProgresses]);
   const completedFiles = useMemo(() => fileProgresses.filter((file) => file.status === "complete").length, [fileProgresses]);
   const reviewCounts = useMemo(() => {
     const drafts = batch?.drafts || [];
@@ -82,7 +81,8 @@ export function AiImportWorkbench({
     setBatch(null);
     setAcceptMessage("");
     setIsRunning(true);
-    setSteps(queueSteps(initialSteps));
+    setLastCompletedFileId(null);
+    setForceExpandedFileIds(new Set());
 
     const formData = new FormData(event.currentTarget);
     const files = formData.getAll("file").filter((file): file is File => file instanceof File && file.size > 0);
@@ -94,6 +94,7 @@ export function AiImportWorkbench({
 
     setSelectedFiles(files);
     setFileProgresses(files.map((file, index) => buildFileProgress(file, index, "pending")));
+    setStepsByFile(Object.fromEntries(files.map((file, index) => [fileProgressId(file.name, index), queueSteps(initialSteps)])));
 
     try {
       const response = await fetch("/api/admin/ai-import/analyze", {
@@ -108,31 +109,41 @@ export function AiImportWorkbench({
 
       await readEventStream(response.body, {
         onStep(step) {
-          setSteps((current) => current.map((item) => (item.id === step.id ? step : item)));
+          const fileId = step.fileId;
+          if (!fileId) return;
+          setStepsByFile((current) => ({
+            ...current,
+            [fileId]: (current[fileId] || initialSteps).map((item) => (item.id === step.id ? step : item))
+          }));
         },
         onFile(file) {
           setFileProgresses((current) => current.map((item) => (item.id === file.id ? { ...item, ...file } : item)));
+          if (file.status === "complete") setLastCompletedFileId(file.id);
         },
         onDraft(nextBatch) {
-          setSteps((current) =>
-            current.map((item) => {
-              if (item.id === "review") {
-                return {
-                  ...item,
-                  status: "complete",
-                  detail: `${nextBatch.drafts.length} review row${nextBatch.drafts.length === 1 ? "" : "s"} ready.`
-                };
-              }
-              if (item.id === "normalize" && item.status !== "complete") {
-                return {
-                  ...item,
-                  status: "complete",
-                  detail: `Normalized ${nextBatch.drafts.length} row${nextBatch.drafts.length === 1 ? "" : "s"} for review.`
-                };
-              }
-              return item;
-            })
-          );
+          setStepsByFile((current) => {
+            const next: Record<string, AiImportStep[]> = {};
+            for (const [fileId, fileSteps] of Object.entries(current)) {
+              next[fileId] = fileSteps.map((item) => {
+                if (item.id === "review") {
+                  return {
+                    ...item,
+                    status: "complete",
+                    detail: `${nextBatch.drafts.length} review row${nextBatch.drafts.length === 1 ? "" : "s"} ready.`
+                  };
+                }
+                if (item.id === "normalize" && item.status !== "complete") {
+                  return {
+                    ...item,
+                    status: "complete",
+                    detail: `Normalized ${nextBatch.drafts.length} row${nextBatch.drafts.length === 1 ? "" : "s"} for review.`
+                  };
+                }
+                return item;
+              });
+            }
+            return next;
+          });
           setBatch(nextBatch);
         },
         onError(message) {
@@ -180,8 +191,10 @@ export function AiImportWorkbench({
       };
       setBatch(null);
       setSelectedFiles([]);
-      setSteps(initialSteps);
+      setStepsByFile({});
       setFileProgresses([]);
+      setLastCompletedFileId(null);
+      setForceExpandedFileIds(new Set());
       setAcceptMessage(
         result.status === "saved"
           ? `Saved ${result.savedCount} row${result.savedCount === 1 ? "" : "s"} and skipped ${result.skippedCount} duplicate${result.skippedCount === 1 ? "" : "s"}.`
@@ -257,7 +270,9 @@ export function AiImportWorkbench({
                     const files = Array.from(event.target.files || []);
                     setSelectedFiles(files);
                     setFileProgresses(files.map((file, index) => buildFileProgress(file, index, "not_started")));
-                    setSteps(initialSteps);
+                    setStepsByFile(Object.fromEntries(files.map((file, index) => [fileProgressId(file.name, index), initialSteps])));
+                    setLastCompletedFileId(null);
+                    setForceExpandedFileIds(new Set());
                     setBatch(null);
                     setAcceptMessage("");
                     setError("");
@@ -333,54 +348,70 @@ export function AiImportWorkbench({
               </div>
               {fileProgresses.length > 0 ? (
                 <div className="flex flex-col gap-3">
-                  {fileProgresses.map((file) => (
-                    <div key={file.id} className="rounded-lg border bg-background/80 p-3">
-                      <div className="mb-3 flex items-start justify-between gap-3">
-                        <div className="flex min-w-0 items-start gap-3">
-                          <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
-                            <FileText />
+                  {fileProgresses.map((file, index) => {
+                    const isExpanded =
+                      file.status !== "complete" ||
+                      file.id === lastCompletedFileId ||
+                      index === fileProgresses.length - 1 ||
+                      forceExpandedFileIds.has(file.id);
+
+                    if (!isExpanded) {
+                      return (
+                        <button
+                          key={file.id}
+                          type="button"
+                          onClick={() => setForceExpandedFileIds((current) => new Set(current).add(file.id))}
+                          className="flex w-full items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-left text-sm transition-colors duration-200 animate-in fade-in-0 slide-in-from-top-1 hover:bg-muted/30"
+                        >
+                          <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
+                          <span className="min-w-0 flex-1 truncate">{file.fileName}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {file.draftCount ?? 0} row{file.draftCount === 1 ? "" : "s"}
+                          </span>
+                        </button>
+                      );
+                    }
+
+                    const fileSteps = stepsByFile[file.id] || initialSteps;
+
+                    return (
+                      <div key={file.id} className="rounded-lg border bg-background/80 p-3">
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-start gap-3">
+                            <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
+                              <FileText />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium">{file.fileName}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatBytes(file.bytes)} · {file.detail}
+                              </p>
+                            </div>
                           </div>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium">{file.fileName}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {formatBytes(file.bytes)} · {file.detail}
-                            </p>
-                          </div>
+                          <Badge variant={statusBadgeVariant(file.status)}>{statusLabel(file.status)}</Badge>
                         </div>
-                        <Badge variant={statusBadgeVariant(file.status)}>{statusLabel(file.status)}</Badge>
+                        <Progress
+                          value={file.progress}
+                          indeterminate={file.status === "running" && file.progress < 95}
+                          label={`${file.fileName} progress`}
+                        />
+                        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 border-t pt-3">
+                          {fileSteps.map((step) => (
+                            <span key={step.id} className="flex items-center gap-1.5 text-xs text-muted-foreground" title={step.detail}>
+                              <StepIcon status={step.status} size="size-3.5" />
+                              {step.label}
+                            </span>
+                          ))}
+                        </div>
                       </div>
-                      <Progress
-                        value={file.progress}
-                        indeterminate={file.status === "running" && file.progress < 95}
-                        label={`${file.fileName} progress`}
-                      />
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                   Selected files will appear here before analysis starts.
                 </div>
               )}
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium">Stages</p>
-                <Badge variant="outline">{activeCount}/{steps.length}</Badge>
-              </div>
-              {steps.map((step) => (
-                <div key={step.id} className="flex gap-3 rounded-md border p-3">
-                  <StepIcon status={step.status} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium">{step.label}</p>
-                      <Badge variant={statusBadgeVariant(step.status)}>{statusLabel(step.status)}</Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{step.detail}</p>
-                  </div>
-                </div>
-              ))}
             </div>
           </CardContent>
         </Card>
@@ -595,12 +626,12 @@ function parseEventChunk(chunk: string) {
   }
 }
 
-function StepIcon({ status }: { status: AiImportStep["status"] }) {
-  if (status === "complete") return <CheckCircle2 className="mt-0.5 size-4 text-emerald-600" />;
-  if (status === "running") return <Loader2 className="mt-0.5 size-4 animate-spin text-primary" />;
-  if (status === "pending") return <Clock3 className="mt-0.5 size-4 text-muted-foreground" />;
-  if (status === "error") return <Circle className="mt-0.5 size-4 text-destructive" />;
-  return <Circle className="mt-0.5 size-4 text-muted-foreground" />;
+function StepIcon({ status, size = "size-4" }: { status: AiImportStep["status"]; size?: string }) {
+  if (status === "complete") return <CheckCircle2 className={`mt-0.5 ${size} text-emerald-600`} />;
+  if (status === "running") return <Loader2 className={`mt-0.5 ${size} animate-spin text-primary`} />;
+  if (status === "pending") return <Clock3 className={`mt-0.5 ${size} text-muted-foreground`} />;
+  if (status === "error") return <Circle className={`mt-0.5 ${size} text-destructive`} />;
+  return <Circle className={`mt-0.5 ${size} text-muted-foreground`} />;
 }
 
 function queueSteps(steps: AiImportStep[]) {
@@ -611,9 +642,15 @@ function queueSteps(steps: AiImportStep[]) {
   }));
 }
 
+// Mirrors fileProgressId() in src/lib/ai-import.ts — duplicated because that module is
+// server-only and can't be imported into this client component.
+function fileProgressId(fileName: string, index: number) {
+  return `${index}:${fileName}`;
+}
+
 function buildFileProgress(file: File, index: number, status: AiImportFileProgress["status"]): AiImportFileProgress {
   return {
-    id: `${index}:${file.name}`,
+    id: fileProgressId(file.name, index),
     fileName: file.name,
     bytes: file.size,
     status,

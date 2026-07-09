@@ -296,6 +296,45 @@ export async function deleteAction(arg1: FormData | { status: "idle" | "deleted"
   return { status: "deleted" as const };
 }
 
+type BulkDeleteState = { status: "idle" | "deleted"; error?: string; deletedCount?: number };
+
+export async function bulkDeleteAction(
+  _previousState: BulkDeleteState | null,
+  formData: FormData
+): Promise<BulkDeleteState>;
+export async function bulkDeleteAction(formData: FormData): Promise<BulkDeleteState>;
+export async function bulkDeleteAction(arg1: FormData | BulkDeleteState | null, arg2?: FormData) {
+  await assertSameOrigin();
+  await requireAdminOrOperator();
+  const formData = arg2 ?? arg1;
+  if (!(formData instanceof FormData)) {
+    return { status: "idle" as const, error: "Invalid deletion submission." };
+  }
+  if (formData.get("confirm") !== "on") {
+    return { status: "idle" as const, error: "Confirm deletion before continuing." };
+  }
+  const kind = String(formData.get("kind"));
+  const ids = formData.getAll("id").map(String).filter(Boolean);
+  if (!["institutions", "accounts", "monthlyRecords"].includes(kind) || ids.length === 0) {
+    return { status: "idle" as const, error: "Choose records before deleting." };
+  }
+
+  for (const id of ids) {
+    if (kind === "institutions") {
+      await deleteByField("monthlyRecords", "institutionId", id);
+      await deleteByField("accounts", "institutionId", id);
+    } else if (kind === "accounts") {
+      await deleteByField("monthlyRecords", "accountId", id);
+    }
+    await deleteDocument(kind as "institutions" | "accounts" | "monthlyRecords", id);
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  revalidatePath("/drill");
+  return { status: "deleted" as const, deletedCount: ids.length };
+}
+
 export async function createUserAction(formData: FormData) {
   await assertSameOrigin();
   const session = await requireAdminOrUserManager();

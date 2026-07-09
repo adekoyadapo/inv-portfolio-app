@@ -2,11 +2,12 @@ import { NextRequest } from "next/server";
 import * as XLSX from "xlsx";
 
 import { getSession } from "@/lib/auth";
+import { monthlyRecordCsvHeaders, stringifyCsv } from "@/lib/csv";
 import { buildDataExport } from "@/lib/elasticsearch";
 import { logServerEvent, serializeError } from "@/lib/logger";
 import type { DataExportDump, DataExportScope } from "@/lib/types";
 
-type ExportFormat = "json" | "xlsx";
+type ExportFormat = "json" | "xlsx" | "csv";
 
 export async function GET(request: NextRequest) {
   const session = await getSession();
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
   const scopeParam = request.nextUrl.searchParams.get("scope");
   const scope: DataExportScope = scopeParam === "full" ? "full" : "portfolio";
   const formatParam = request.nextUrl.searchParams.get("format");
-  const format: ExportFormat = formatParam === "xlsx" ? "xlsx" : "json";
+  const format: ExportFormat = formatParam === "xlsx" ? "xlsx" : formatParam === "csv" ? "csv" : "json";
 
   try {
     const dump = await buildDataExport(scope);
@@ -32,6 +33,16 @@ export async function GET(request: NextRequest) {
     });
 
     const datePart = dump.exportedAt.slice(0, 10);
+    if (format === "csv") {
+      const csvText = buildExportCsv(dump);
+      return new Response(csvText, {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="investment-dashboard-export-${scope}-${datePart}.csv"`,
+          "Cache-Control": "no-store"
+        }
+      });
+    }
     if (format === "xlsx") {
       const workbook = buildExportWorkbook(dump);
       const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
@@ -55,6 +66,21 @@ export async function GET(request: NextRequest) {
     logServerEvent("error", "data_export_failed", { username: session.username, scope, format, error: serializeError(error) });
     return Response.json({ error: error instanceof Error ? error.message : "Unable to export data." }, { status: 500 });
   }
+}
+
+function buildExportCsv(dump: DataExportDump): string {
+  const institutionName = new Map(dump.data.institutions.map((institution) => [institution.id, institution.name]));
+  const accountById = new Map(dump.data.accounts.map((account) => [account.id, account]));
+  const rows = dump.data.monthlyRecords.map((record) => [
+    institutionName.get(record.institutionId) || "",
+    accountById.get(record.accountId)?.name || "",
+    accountById.get(record.accountId)?.type || "",
+    record.month,
+    String(record.amountInvested),
+    String(record.currentValue),
+    record.currencyCode || "USD"
+  ]);
+  return stringifyCsv(monthlyRecordCsvHeaders, rows);
 }
 
 function buildExportWorkbook(dump: DataExportDump) {

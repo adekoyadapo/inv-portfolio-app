@@ -1,6 +1,24 @@
-import { AlertCircle, ArrowDown, ArrowUp, ArrowUpDown, Download, FileUp, ImageUp, Plus, Save, Shield, UserPlus } from "lucide-react";
-import Link from "next/link";
-import type { ReactNode } from "react";
+import {
+  AlertCircle,
+  Building2,
+  CalendarClock,
+  Download,
+  FileSpreadsheet,
+  FileUp,
+  ImageUp,
+  Landmark,
+  List,
+  ListChecks,
+  PenSquare,
+  Plus,
+  Save,
+  Shield,
+  Table2,
+  Tags,
+  UserPlus,
+  Users,
+  Wallet
+} from "lucide-react";
 
 import {
   createUserAction,
@@ -11,8 +29,11 @@ import {
   saveMonthlyRecordAction,
   updateInstitutionLogoAction
 } from "@/app/actions";
+import { AccountsTable } from "@/components/accounts-table";
 import { AiFeatureToggleCard } from "@/components/ai-feature-toggle-card";
 import { DeleteRecordButton, DeleteUserButton } from "@/components/delete-confirm-button";
+import { InstitutionsTable } from "@/components/institutions-table";
+import { MonthlyRecordsTable, type MonthlyRecordRow, type MonthlyRecordSortKey } from "@/components/monthly-records-table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,24 +42,19 @@ import { DataMigrationCard } from "@/components/data-migration-card";
 import { DemoFeatureToggleCard } from "@/components/demo-feature-toggle-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MonthlyRecordsPaginationControls } from "@/components/monthly-records-pagination";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireAdminOrPortfolioAccess } from "@/lib/auth";
 import { getAiImportSettings, listAccounts, listInstitutions, listMonthlyRecords, listUsers } from "@/lib/elasticsearch";
 import { getAiRuntimeConfig } from "@/lib/ai-config";
 import { paginate, sortByComparator, type SortDirection } from "@/lib/pagination";
+import { withMinDuration } from "@/lib/timing";
 import type { Account, Institution, MonthlyRecord, PublicUser } from "@/lib/types";
-import { cn, currency, monthLabel } from "@/lib/utils";
 
 const baseAccountTypes = ["RESP", "RRSP", "TFSA", "FHSA", "DPSP", "Stock", "Index", "Cash", "Other"];
 
-type MonthlyRecordSortKey = "month" | "institution" | "account" | "currency" | "invested" | "current";
-
 const MONTHLY_RECORD_SORT_KEYS: MonthlyRecordSortKey[] = ["month", "institution", "account", "currency", "invested", "current"];
 const MONTHLY_RECORD_PAGE_SIZES = [10, 25, 50, 100] as const;
-
-type MonthlyRecordRow = MonthlyRecord & { institutionLabel: string; accountLabel: string };
 
 const MONTHLY_RECORD_COMPARATORS: Record<MonthlyRecordSortKey, (a: MonthlyRecordRow, b: MonthlyRecordRow) => number> = {
   month: (a, b) => a.month.localeCompare(b.month),
@@ -90,69 +106,42 @@ function buildMonthlyRecordsHref(
   return `/admin?${params.toString()}#monthly-records`;
 }
 
-function MonthlyRecordSortHeader({
-  href,
-  active,
-  dir,
-  align,
-  children
-}: {
-  href: string;
-  active: boolean;
-  dir: SortDirection;
-  align?: "right";
-  children: ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className={cn("inline-flex items-center gap-1 transition-colors hover:text-primary", align === "right" ? "flex-row-reverse" : "")}
-    >
-      {children}
-      {active ? (
-        dir === "asc" ? (
-          <ArrowUp className="size-3.5" />
-        ) : (
-          <ArrowDown className="size-3.5" />
-        )
-      ) : (
-        <ArrowUpDown className="size-3.5 opacity-40" />
-      )}
-    </Link>
-  );
-}
-
 export default async function AdminPage({
   searchParams
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [session, aiImportSettings, rawSearchParams] = await Promise.all([
-    requireAdminOrPortfolioAccess(),
-    getAiImportSettings(),
-    searchParams
-  ]);
+  const { session, aiImportSettings, rawSearchParams, institutions, accounts, records, users, loadError } = await withMinDuration(async () => {
+    const [session, aiImportSettings, rawSearchParams] = await Promise.all([
+      requireAdminOrPortfolioAccess(),
+      getAiImportSettings(),
+      searchParams
+    ]);
+
+    let institutions: Institution[] = [];
+    let accounts: Account[] = [];
+    let records: MonthlyRecord[] = [];
+    let users: PublicUser[] = [];
+    let loadError = "";
+
+    try {
+      [institutions, accounts, records, users] = await Promise.all([
+        listInstitutions(),
+        listAccounts(),
+        listMonthlyRecords(),
+        listUsers()
+      ]);
+    } catch (error) {
+      loadError = error instanceof Error ? error.message : "Unable to load admin data.";
+    }
+
+    return { session, aiImportSettings, rawSearchParams, institutions, accounts, records, users, loadError };
+  }, 2000);
+
   const runtimeConfig = getAiRuntimeConfig();
   const isAdmin = session.role === "admin";
   const canEditPortfolio = isAdmin || session.role === "operator";
   const canManageUsers = isAdmin || session.role === "user_manager";
-
-  let institutions: Institution[] = [];
-  let accounts: Account[] = [];
-  let records: MonthlyRecord[] = [];
-  let users: PublicUser[] = [];
-  let loadError = "";
-
-  try {
-    [institutions, accounts, records, users] = await Promise.all([
-      listInstitutions(),
-      listAccounts(),
-      listMonthlyRecords(),
-      listUsers()
-    ]);
-  } catch (error) {
-    loadError = error instanceof Error ? error.message : "Unable to load admin data.";
-  }
 
   const institutionName = new Map(institutions.map((institution) => [institution.id, institution.name]));
   const accountById = new Map(accounts.map((account) => [account.id, account]));
@@ -184,6 +173,15 @@ export default async function AdminPage({
     left.localeCompare(right)
   );
 
+  const institutionImpactById = Object.fromEntries(
+    institutions.map((institution) => [
+      institution.id,
+      { accountCount: accountCountByInstitution.get(institution.id) || 0, recordCount: recordCountByInstitution.get(institution.id) || 0 }
+    ])
+  );
+  const institutionNameById = Object.fromEntries(institutions.map((institution) => [institution.id, institution.name]));
+  const recordCountByAccountId = Object.fromEntries(accounts.map((account) => [account.id, recordCountByAccount.get(account.id) || 0]));
+
   const monthlyRecordsState = parseMonthlyRecordsState(rawSearchParams);
   const monthlyRecordRows: MonthlyRecordRow[] = records.map((record) => ({
     ...record,
@@ -211,6 +209,10 @@ export default async function AdminPage({
     const nextDir: SortDirection = monthlyRecordsState.sort === key ? (monthlyRecordsState.dir === "asc" ? "desc" : "asc") : "asc";
     return buildMonthlyRecordsHref(rawSearchParams, monthlyRecordsPageState, { sort: key, dir: nextDir, page: 1 });
   }
+  const monthlyRecordSortHrefs = Object.fromEntries(MONTHLY_RECORD_SORT_KEYS.map((key) => [key, monthlyRecordSortHref(key)])) as Record<
+    MonthlyRecordSortKey,
+    string
+  >;
 
   return (
     <>
@@ -263,14 +265,52 @@ export default async function AdminPage({
         </section>
       ) : null}
 
-      {isAdmin ? <DataMigrationCard /> : null}
-
       {canEditPortfolio ? (
         <>
+          <section className="grid gap-4 xl:grid-cols-2">
+            {isAdmin ? <DataMigrationCard /> : null}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileSpreadsheet data-icon="inline-start" />
+                  CSV import
+                </CardTitle>
+                <CardDescription>Import institutions, accounts, and month-end records in one file.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <form action={importCsvAction} className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="csv-import">CSV file</Label>
+                    <Input id="csv-import" name="csv" type="file" accept=".csv,text/csv" required />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button type="submit">
+                      <FileUp data-icon="inline-start" />
+                      Import CSV
+                    </Button>
+                    <Button asChild variant="outline" size="sm">
+                      <a href="/admin/monthly-records-template.csv" download>
+                        <Download data-icon="inline-start" />
+                        Download template
+                      </a>
+                    </Button>
+                  </div>
+                </form>
+                <p className="text-xs text-muted-foreground">
+                  Columns: institution_name, account_name, account_type, month, amount_invested, current_value,
+                  currency_code. Upserts institutions/accounts by name and month &mdash; safe to re-run.
+                </p>
+              </CardContent>
+            </Card>
+          </section>
+
           <section className="grid gap-4 xl:grid-cols-3">
             <Card>
               <CardHeader>
-                <CardTitle>Institution</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Landmark data-icon="inline-start" />
+                  Institution
+                </CardTitle>
                 <CardDescription>Add a financial institution and upload its logo.</CardDescription>
               </CardHeader>
               <CardContent>
@@ -293,7 +333,10 @@ export default async function AdminPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>Account</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Wallet data-icon="inline-start" />
+                  Account
+                </CardTitle>
                 <CardDescription>Create an account under an institution.</CardDescription>
               </CardHeader>
               <CardContent>
@@ -333,7 +376,10 @@ export default async function AdminPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>Monthly record</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <CalendarClock data-icon="inline-start" />
+                  Monthly record
+                </CardTitle>
                 <CardDescription>Upsert a month-end invested amount and current value.</CardDescription>
               </CardHeader>
               <CardContent>
@@ -397,7 +443,10 @@ export default async function AdminPage({
 
           <Card className="overflow-hidden border-border/70 bg-gradient-to-b from-background via-background to-muted/20 shadow-[0_18px_44px_-28px_rgba(15,23,42,0.32)] dark:shadow-[0_24px_60px_-34px_rgba(0,0,0,0.82)]">
             <CardHeader>
-              <CardTitle>Edit accounts</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <PenSquare data-icon="inline-start" />
+                Edit accounts
+              </CardTitle>
               <CardDescription>Update account names and types in place. Changes reflow through the dashboard immediately.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -450,80 +499,54 @@ export default async function AdminPage({
             </CardContent>
           </Card>
 
-          <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-            <Card className="overflow-hidden border-border/70 bg-background/90 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.32)]">
-              <CardHeader>
-                <CardTitle>Edit institutions</CardTitle>
-                <CardDescription>Rename institutions without losing their logos, accounts, or monthly records.</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                {institutions.length > 0 ? (
-                  institutions.map((institution) => (
-                    <div
-                      key={institution.id}
-                      className="grid gap-3 rounded-xl border border-border/70 bg-background/80 p-4 sm:grid-cols-[auto_1fr_auto_auto]"
-                    >
-                      <Avatar>
-                        {institution.logoUrl ? <AvatarImage src={institution.logoUrl} alt={`${institution.name} logo`} /> : null}
-                        <AvatarFallback>{institution.name.slice(0, 2).toUpperCase()}</AvatarFallback>
-                      </Avatar>
-                      <form action={saveInstitutionAction} className="contents">
-                        <input type="hidden" name="id" value={institution.id} />
-                        <div className="flex flex-col gap-2">
-                          <Label className="sr-only" htmlFor={`edit-institution-name-${institution.id}`}>
-                            Institution name
-                          </Label>
-                          <Input id={`edit-institution-name-${institution.id}`} name="name" defaultValue={institution.name} required />
-                        </div>
-                        <Button type="submit">
-                          <Save data-icon="inline-start" />
-                          Save
-                        </Button>
-                      </form>
-                      <DeleteRecordButton kind="institutions" id={institution.id} impactMessage={institutionDeleteImpact(institution.id)} />
-                    </div>
-                  ))
-                ) : (
-                  <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No institutions yet.</p>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="overflow-hidden border-border/70 bg-background/90 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.32)]">
-              <CardHeader>
-                <CardTitle>Account type tools</CardTitle>
-                <CardDescription>Add a new type by typing it on an account, or rename a type across existing accounts.</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                <form action={renameAccountTypeAction} className="flex flex-col gap-4">
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="rename-account-type-current">Current type</Label>
-                    <Input id="rename-account-type-current" name="currentType" list="account-type-options" placeholder="TFSA" required />
+          <Card className="overflow-hidden border-border/70 bg-background/90 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.32)]">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Building2 data-icon="inline-start" />
+                Edit institutions
+              </CardTitle>
+              <CardDescription>Rename institutions without losing their logos, accounts, or monthly records.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {institutions.length > 0 ? (
+                institutions.map((institution) => (
+                  <div
+                    key={institution.id}
+                    className="grid gap-3 rounded-xl border border-border/70 bg-background/80 p-4 sm:grid-cols-[auto_1fr_auto_auto]"
+                  >
+                    <Avatar>
+                      {institution.logoUrl ? <AvatarImage src={institution.logoUrl} alt={`${institution.name} logo`} /> : null}
+                      <AvatarFallback>{institution.name.slice(0, 2).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <form action={saveInstitutionAction} className="contents">
+                      <input type="hidden" name="id" value={institution.id} />
+                      <div className="flex flex-col gap-2">
+                        <Label className="sr-only" htmlFor={`edit-institution-name-${institution.id}`}>
+                          Institution name
+                        </Label>
+                        <Input id={`edit-institution-name-${institution.id}`} name="name" defaultValue={institution.name} required />
+                      </div>
+                      <Button type="submit">
+                        <Save data-icon="inline-start" />
+                        Save
+                      </Button>
+                    </form>
+                    <DeleteRecordButton kind="institutions" id={institution.id} impactMessage={institutionDeleteImpact(institution.id)} />
                   </div>
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="rename-account-type-new">New type</Label>
-                    <Input id="rename-account-type-new" name="newType" list="account-type-options" placeholder="Registered TFSA" required />
-                  </div>
-                  <Button type="submit" disabled={accounts.length === 0}>
-                    <Save data-icon="inline-start" />
-                    Rename type
-                  </Button>
-                </form>
-                <div className="flex flex-wrap gap-2">
-                  {accountTypes.map((type) => (
-                    <Badge key={type} variant="secondary">
-                      {type}
-                    </Badge>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </section>
+                ))
+              ) : (
+                <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No institutions yet.</p>
+              )}
+            </CardContent>
+          </Card>
 
           <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
             <Card>
               <CardHeader>
-                <CardTitle>Update institution logo</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <ImageUp data-icon="inline-start" />
+                  Update institution logo
+                </CardTitle>
                 <CardDescription>Replace the logo for an existing institution.</CardDescription>
               </CardHeader>
               <CardContent>
@@ -559,64 +582,34 @@ export default async function AdminPage({
 
             <Card>
               <CardHeader>
-                <CardTitle>CSV import</CardTitle>
-                <CardDescription>Import institutions, accounts, and month-end records in one file.</CardDescription>
+                <CardTitle className="flex items-center gap-2">
+                  <Tags data-icon="inline-start" />
+                  Account type tools
+                </CardTitle>
+                <CardDescription>Add a new type by typing it on an account, or rename a type across existing accounts.</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
-                <form action={importCsvAction} className="flex flex-col gap-4">
+                <form action={renameAccountTypeAction} className="flex flex-col gap-4">
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="csv-import">CSV file</Label>
-                    <Input id="csv-import" name="csv" type="file" accept=".csv,text/csv" required />
+                    <Label htmlFor="rename-account-type-current">Current type</Label>
+                    <Input id="rename-account-type-current" name="currentType" list="account-type-options" placeholder="TFSA" required />
                   </div>
-                  <Button type="submit">
-                    <FileUp data-icon="inline-start" />
-                    Import CSV
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="rename-account-type-new">New type</Label>
+                    <Input id="rename-account-type-new" name="newType" list="account-type-options" placeholder="Registered TFSA" required />
+                  </div>
+                  <Button type="submit" disabled={accounts.length === 0}>
+                    <Save data-icon="inline-start" />
+                    Rename type
                   </Button>
                 </form>
-                <div className="rounded-md border">
-                  <div className="flex items-center justify-between border-b p-3">
-                    <p className="text-sm font-medium">Template preview</p>
-                    <Button asChild variant="outline" size="sm">
-                      <a href="/admin/monthly-records-template.csv" download>
-                        <Download data-icon="inline-start" />
-                        Download
-                      </a>
-                    </Button>
-                  </div>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>institution_name</TableHead>
-                        <TableHead>account_name</TableHead>
-                      <TableHead>account_type</TableHead>
-                      <TableHead>month</TableHead>
-                      <TableHead>amount_invested</TableHead>
-                      <TableHead>current_value</TableHead>
-                      <TableHead>currency_code</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow>
-                      <TableCell>Wealthsimple</TableCell>
-                        <TableCell>Growth TFSA</TableCell>
-                        <TableCell>TFSA</TableCell>
-                      <TableCell>2026-01</TableCell>
-                      <TableCell>12000</TableCell>
-                      <TableCell>12850</TableCell>
-                      <TableCell>CAD</TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell>CIBC</TableCell>
-                      <TableCell>Family RESP</TableCell>
-                      <TableCell>RESP</TableCell>
-                      <TableCell>2026-01</TableCell>
-                      <TableCell>5400</TableCell>
-                      <TableCell>5610</TableCell>
-                      <TableCell>CAD</TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </div>
+                <div className="flex flex-wrap gap-2">
+                  {accountTypes.map((type) => (
+                    <Badge key={type} variant="secondary">
+                      {type}
+                    </Badge>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           </section>
@@ -624,161 +617,45 @@ export default async function AdminPage({
           <section className="grid gap-4 xl:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>Institutions</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <List data-icon="inline-start" />
+                  Institutions
+                </CardTitle>
                 <CardDescription>Logo branding used across account cards and tables.</CardDescription>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {institutions.map((institution) => (
-                      <TableRow key={institution.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar>
-                              {institution.logoUrl ? <AvatarImage src={institution.logoUrl} alt={`${institution.name} logo`} /> : null}
-                              <AvatarFallback>{institution.name.slice(0, 2).toUpperCase()}</AvatarFallback>
-                            </Avatar>
-                            <span className="font-medium">{institution.name}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <DeleteRecordButton kind="institutions" id={institution.id} impactMessage={institutionDeleteImpact(institution.id)} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {institutions.length === 0 ? <EmptyRow colSpan={2} message="No institutions yet." /> : null}
-                  </TableBody>
-                </Table>
+                <InstitutionsTable institutions={institutions} impactById={institutionImpactById} />
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Accounts</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <ListChecks data-icon="inline-start" />
+                  Accounts
+                </CardTitle>
                 <CardDescription>Accounts belong to one institution.</CardDescription>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Institution</TableHead>
-                      <TableHead>Account</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {accounts.map((account) => (
-                      <TableRow key={account.id}>
-                        <TableCell>{institutionName.get(account.institutionId) || "Unknown"}</TableCell>
-                        <TableCell>{account.name}</TableCell>
-                        <TableCell>{account.type}</TableCell>
-                        <TableCell className="text-right">
-                          <DeleteRecordButton kind="accounts" id={account.id} impactMessage={accountDeleteImpact(account.id)} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {accounts.length === 0 ? <EmptyRow colSpan={4} message="No accounts yet." /> : null}
-                  </TableBody>
-                </Table>
+                <AccountsTable accounts={accounts} institutionNameById={institutionNameById} recordCountByAccountId={recordCountByAccountId} />
               </CardContent>
             </Card>
           </section>
 
           <Card id="monthly-records">
             <CardHeader>
-              <CardTitle>Monthly records</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+              <Table2 data-icon="inline-start" />
+              Monthly records
+            </CardTitle>
               <CardDescription>Each account can have one record per month.</CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>
-                        <MonthlyRecordSortHeader
-                          href={monthlyRecordSortHref("month")}
-                          active={monthlyRecordsState.sort === "month"}
-                          dir={monthlyRecordsState.dir}
-                        >
-                          Month
-                        </MonthlyRecordSortHeader>
-                      </TableHead>
-                      <TableHead>
-                        <MonthlyRecordSortHeader
-                          href={monthlyRecordSortHref("institution")}
-                          active={monthlyRecordsState.sort === "institution"}
-                          dir={monthlyRecordsState.dir}
-                        >
-                          Institution
-                        </MonthlyRecordSortHeader>
-                      </TableHead>
-                      <TableHead>
-                        <MonthlyRecordSortHeader
-                          href={monthlyRecordSortHref("account")}
-                          active={monthlyRecordsState.sort === "account"}
-                          dir={monthlyRecordsState.dir}
-                        >
-                          Account
-                        </MonthlyRecordSortHeader>
-                      </TableHead>
-                      <TableHead>
-                        <MonthlyRecordSortHeader
-                          href={monthlyRecordSortHref("currency")}
-                          active={monthlyRecordsState.sort === "currency"}
-                          dir={monthlyRecordsState.dir}
-                        >
-                          Currency
-                        </MonthlyRecordSortHeader>
-                      </TableHead>
-                      <TableHead className="text-right">
-                        <MonthlyRecordSortHeader
-                          href={monthlyRecordSortHref("invested")}
-                          active={monthlyRecordsState.sort === "invested"}
-                          dir={monthlyRecordsState.dir}
-                          align="right"
-                        >
-                          Invested
-                        </MonthlyRecordSortHeader>
-                      </TableHead>
-                      <TableHead className="text-right">
-                        <MonthlyRecordSortHeader
-                          href={monthlyRecordSortHref("current")}
-                          active={monthlyRecordsState.sort === "current"}
-                          dir={monthlyRecordsState.dir}
-                          align="right"
-                        >
-                          Current value
-                        </MonthlyRecordSortHeader>
-                      </TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {monthlyRecordsPage.items.map((record) => (
-                      <TableRow key={record.id}>
-                        <TableCell>{monthLabel(record.month)}</TableCell>
-                        <TableCell>{record.institutionLabel}</TableCell>
-                        <TableCell>{record.accountLabel}</TableCell>
-                        <TableCell>{record.currencyCode || "USD"}</TableCell>
-                        <TableCell className="text-right">{currency(record.amountInvested, record.currencyCode)}</TableCell>
-                        <TableCell className="text-right">{currency(record.currentValue, record.currencyCode)}</TableCell>
-                        <TableCell className="text-right">
-                          <DeleteRecordButton kind="monthlyRecords" id={record.id} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {monthlyRecordsPage.items.length === 0 ? <EmptyRow colSpan={7} message="No monthly records yet." /> : null}
-                  </TableBody>
-                </Table>
-              </div>
-              <MonthlyRecordsPaginationControls
+            <CardContent>
+              <MonthlyRecordsTable
+                rows={monthlyRecordsPage.items}
+                sort={monthlyRecordsState.sort}
+                dir={monthlyRecordsState.dir}
+                sortHrefs={monthlyRecordSortHrefs}
                 start={monthlyRecordsPage.start}
                 end={Math.min(monthlyRecordsPage.start + monthlyRecordsState.size, monthlyRecordsPage.totalItems)}
                 totalItems={monthlyRecordsPage.totalItems}
@@ -796,7 +673,10 @@ export default async function AdminPage({
         <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
           <Card>
             <CardHeader>
-              <CardTitle>User access</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <UserPlus data-icon="inline-start" />
+                User access
+              </CardTitle>
               <CardDescription>
                 {isAdmin
                   ? "Create admins, operators, user managers, or viewers."
@@ -846,7 +726,10 @@ export default async function AdminPage({
 
           <Card>
             <CardHeader>
-              <CardTitle>Users</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Users data-icon="inline-start" />
+                Users
+              </CardTitle>
               <CardDescription>Passwords are stored as salted scrypt hashes and never displayed.</CardDescription>
             </CardHeader>
             <CardContent>

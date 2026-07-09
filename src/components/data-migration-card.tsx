@@ -30,7 +30,7 @@ type ImportSummary = {
 export function DataMigrationCard() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [exportFormat, setExportFormat] = useState<"json" | "xlsx">("json");
+  const [exportFormat, setExportFormat] = useState<"json" | "xlsx" | "csv">("json");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -86,7 +86,7 @@ export function DataMigrationCard() {
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-medium">Export</p>
-            <Select value={exportFormat} onValueChange={(value) => setExportFormat(value as "json" | "xlsx")}>
+            <Select value={exportFormat} onValueChange={(value) => setExportFormat(value as "json" | "xlsx" | "csv")}>
               <SelectTrigger className="w-32">
                 <SelectValue />
               </SelectTrigger>
@@ -94,6 +94,7 @@ export function DataMigrationCard() {
                 <SelectGroup>
                   <SelectItem value="json">JSON</SelectItem>
                   <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
+                  <SelectItem value="csv">CSV</SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
@@ -115,8 +116,8 @@ export function DataMigrationCard() {
           <p className="text-xs text-muted-foreground">
             Portfolio data covers institutions, accounts, and monthly records. Everything also includes users (with
             password hashes) and feature settings. Institution logos live in object storage and aren&apos;t part of
-            the dump. Excel exports one sheet per table and are for viewing/analysis &mdash; only JSON can be
-            imported back in below.
+            the dump. Excel exports one sheet per table and are for viewing/analysis. CSV exports monthly records
+            only, in the same layout as the CSV import below &mdash; only JSON round-trips the full dump.
           </p>
         </div>
 
