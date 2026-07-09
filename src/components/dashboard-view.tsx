@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AlertCircle, ArrowDownRight, ArrowUpRight, DollarSign, Info, Landmark, TrendingUp } from "lucide-react";
 
-import { AllocationDonutChart, InstitutionBreakdownChart, MetricSparkline, PortfolioTimelineChart } from "@/components/dashboard-charts";
+import { AllocationDonutChart, InstitutionBreakdownChart, MetricSparkline, PortfolioTimelineChart } from "@/components/dashboard-charts-lazy";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LatestAccountValuesTable } from "@/components/latest-account-values-table";
 import { MonthlyReturnHeatmap } from "@/components/monthly-return-heatmap";

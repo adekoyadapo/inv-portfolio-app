@@ -9,6 +9,7 @@ import { logoutAction } from "@/app/actions";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { UserRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -101,7 +102,7 @@ export function AppShell({
       ];
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--muted))_0,transparent_28rem),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.45))] pb-20 md:pb-0">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,hsl(var(--muted))_0,transparent_28rem),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.45))] pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0">
       {isNavigating ? (
         <div className="fixed inset-x-0 top-0 z-50 h-1 overflow-hidden bg-primary/15">
           <div className="route-progress-bar h-full w-1/2 bg-primary" />
@@ -216,45 +217,66 @@ export function AppShell({
           >
             Investment Admin
           </Link>
-          <div className="flex items-center gap-2">
-            {!isDemoRoute && canOpenAdmin ? (
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/admin" onClick={() => markNavigation("/admin")}>Admin</Link>
-              </Button>
-            ) : null}
-            {!isDemoRoute && canOpenAiImport ? (
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/admin/ai-import" onClick={() => markNavigation("/admin/ai-import")}>Smart Import</Link>
-              </Button>
-            ) : null}
+          <div className="flex items-center gap-1">
+            <TooltipProvider delayDuration={150}>
+              {!isDemoRoute && canOpenAdmin ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button asChild variant="ghost" size="icon" aria-label="Admin">
+                      <Link href="/admin" onClick={() => markNavigation("/admin")}>
+                        <Building2 />
+                      </Link>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Admin</TooltipContent>
+                </Tooltip>
+              ) : null}
+              {!isDemoRoute && canOpenAiImport ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button asChild variant="ghost" size="icon" aria-label="Smart Import">
+                      <Link href="/admin/ai-import" onClick={() => markNavigation("/admin/ai-import")}>
+                        <FileUp />
+                      </Link>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Smart Import</TooltipContent>
+                </Tooltip>
+              ) : null}
+            </TooltipProvider>
             <ThemeToggle />
           </div>
         </header>
         <main className="page-transition mx-auto flex w-full max-w-[1680px] flex-col gap-6 p-4 md:p-8">{children}</main>
-        <nav className="fixed inset-x-3 bottom-3 z-20 flex items-center justify-around rounded-full border bg-background/95 p-2 shadow-[0_18px_44px_-24px_rgba(15,23,42,0.55)] backdrop-blur md:hidden">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active =
-              pathname === item.href ||
-              pathname?.startsWith(`${item.href}/`) ||
-              (item.href === "/dashboard" && pathname?.startsWith("/drill/"));
+        <nav className="fixed inset-x-4 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-20 flex items-center justify-around rounded-full border bg-background/95 p-2 shadow-[0_18px_44px_-24px_rgba(15,23,42,0.55)] backdrop-blur md:hidden">
+          <TooltipProvider delayDuration={150}>
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active =
+                pathname === item.href ||
+                pathname?.startsWith(`${item.href}/`) ||
+                (item.href === "/dashboard" && pathname?.startsWith("/drill/"));
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-label={item.label}
-                onClick={() => markNavigation(item.href)}
-                className={cn(
-                  "flex min-w-14 flex-col items-center gap-1 rounded-full px-3 py-2 text-[11px] font-medium text-muted-foreground transition-colors",
-                  active && "bg-primary text-primary-foreground"
-                )}
-              >
-                <Icon />
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
+              return (
+                <Tooltip key={item.href}>
+                  <TooltipTrigger asChild>
+                    <Link
+                      href={item.href}
+                      aria-label={item.label}
+                      onClick={() => markNavigation(item.href)}
+                      className={cn(
+                        "flex size-11 items-center justify-center rounded-full text-muted-foreground transition-colors",
+                        active && "bg-primary text-primary-foreground"
+                      )}
+                    >
+                      <Icon />
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent>{item.label}</TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </TooltipProvider>
         </nav>
       </div>
     </div>

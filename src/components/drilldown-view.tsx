@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowDownRight, ArrowLeft, ArrowUpRight, DollarSign, Landmark, TrendingUp } from "lucide-react";
 
-import { AccountValueBarChart, AllocationDonutChart, MomDeltaBarChart, PortfolioTimelineChart } from "@/components/dashboard-charts";
+import { AccountValueBarChart, AllocationDonutChart, MomDeltaBarChart, PortfolioTimelineChart } from "@/components/dashboard-charts-lazy";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
